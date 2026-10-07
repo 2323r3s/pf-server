@@ -156,6 +156,17 @@ const initDB = async () => {
       )
     `);
 
+    // История ауры
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS aura_history (
+        id BIGINT PRIMARY KEY,
+        phone TEXT NOT NULL,
+        delta INTEGER NOT NULL,
+        reason TEXT NOT NULL,
+        date TEXT NOT NULL
+      )
+    `);
+
     console.log('✅ Таблицы готовы');
   } catch (err) {
     console.error('❌ Ошибка таблиц:', err.stack || err.message);
@@ -202,6 +213,34 @@ app.post('/api/users', async (req, res) => {
 app.delete('/api/users/:phone', async (req, res) => {
   try {
     await pool.query('DELETE FROM users WHERE phone=$1', [req.params.phone]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ═══════════════════════════════════════════════════════
+// ИСТОРИЯ АУРЫ
+// ═══════════════════════════════════════════════════════
+app.get('/api/aura_history/:phone', async (req, res) => {
+  try {
+    const r = await pool.query('SELECT * FROM aura_history WHERE phone=$1 ORDER BY id DESC LIMIT 100', [req.params.phone]);
+    res.json(r.rows.map(h => ({
+      id: h.id,
+      phone: h.phone,
+      delta: h.delta,
+      reason: h.reason,
+      date: h.date,
+    })));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/aura_history', async (req, res) => {
+  try {
+    const h = req.body;
+    await pool.query(
+      `INSERT INTO aura_history (id, phone, delta, reason, date)
+       VALUES ($1,$2,$3,$4,$5) ON CONFLICT (id) DO NOTHING`,
+      [h.id, h.phone, h.delta, h.reason, h.date]
+    );
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
