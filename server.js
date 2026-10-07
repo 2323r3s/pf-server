@@ -45,7 +45,6 @@ const initDB = async () => {
       )
     `);
 
-    // Добавляем поля если их нет (для старых баз)
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS has_pension BOOLEAN DEFAULT false`);
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS has_insurance BOOLEAN DEFAULT false`);
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS insurance_until TIMESTAMP`);
@@ -135,6 +134,20 @@ const initDB = async () => {
         user_phone TEXT NOT NULL,
         user_name TEXT NOT NULL,
         reason TEXT NOT NULL,
+        status TEXT DEFAULT 'pending',
+        pr_comment TEXT,
+        created_at TEXT NOT NULL,
+        resolved_at TEXT,
+        resolved_by TEXT
+      )
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS doc_requests (
+        id BIGINT PRIMARY KEY,
+        user_phone TEXT NOT NULL,
+        user_name TEXT NOT NULL,
+        doc_type TEXT NOT NULL,
         status TEXT DEFAULT 'pending',
         pr_comment TEXT,
         created_at TEXT NOT NULL,
@@ -497,6 +510,68 @@ app.post('/api/appeals/:id/resolve', async (req, res) => {
 
     if (status === 'approved') {
       await pool.query('DELETE FROM fines WHERE id=$1', [appeal.fine_id]);
+    }
+
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ═══════════════════════════════════════════════════════
+// ЗАЯВКИ НА ДОКУМЕНТЫ
+// ═══════════════════════════════════════════════════════
+app.get('/api/doc_requests', async (req, res) => {
+  try {
+    const r = await pool.query('SELECT * FROM doc_requests ORDER BY id DESC');
+    res.json(r.rows.map(a => ({
+      id: a.id,
+      userPhone: a.user_phone,
+      userName: a.user_name,
+      docType: a.doc_type,
+      status: a.status,
+      prComment: a.pr_comment,
+      createdAt: a.created_at,
+      resolvedAt: a.resolved_at,
+      resolvedBy: a.resolved_by,
+    })));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/doc_requests', async (req, res) => {
+  try {
+    const a = req.body;
+    await pool.query(
+      `INSERT INTO doc_requests (id, user_phone, user_name, doc_type, status, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6)
+       ON CONFLICT (id) DO UPDATE SET status=$5, pr_comment=$7, resolved_at=$8, resolved_by=$9`,
+      [a.id, a.userPhone, a.userName, a.docType, a.status || 'pending', a.createdAt,
+       a.prComment || null, a.resolvedAt || null, a.resolvedBy || null]
+    );
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/doc_requests/:id/resolve', async (req, res) => {
+  try {
+    const { status, prComment, resolvedBy } = req.body;
+    const reqRes = await pool.query('SELECT * FROM doc_requests WHERE id=$1', [req.params.id]);
+    if (reqRes.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    const request = reqRes.rows[0];
+
+    await pool.query(
+      `UPDATE doc_requests SET status=$1, pr_comment=$2, resolved_at=$3, resolved_by=$4 WHERE id=$5`,
+      [status, prComment || null, new Date().toISOString(), resolvedBy || null, req.params.id]
+    );
+
+    if (status === 'approved') {
+      if (request.doc_type === 'pension') {
+        await pool.query('UPDATE users SET has_pension=true WHERE phone=$1', [request.user_phone]);
+      } else if (request.doc_type === 'insurance') {
+        const until = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString();
+        await pool.query(
+          'UPDATE users SET has_insurance=true, insurance_until=$1 WHERE phone=$2',
+          [until, request.user_phone]
+        );
+      }
     }
 
     res.json({ ok: true });
