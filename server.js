@@ -285,10 +285,9 @@ app.post('/api/casino/spin', async (req, res) => {
       return res.status(400).json({ error: 'Недостаточно тонков', need: bet - user.tonki });
     }
 
-    // Символы: яблоко, вишня, слива, банан
-    // Банан — ультра редкий (5%)
+    // Символы: яблоко, вишня, персик, банан (банан редкий)
     const symbols = ['🍎', '🍒', '🍑', '🍌'];
-    const weights = [35, 35, 25, 5]; // шансы: 35%, 35%, 25%, 5%
+    const weights = [35, 35, 25, 5];
 
     const pickWeighted = () => {
       const total = weights.reduce((s, w) => s + w, 0);
@@ -302,7 +301,6 @@ app.post('/api/casino/spin', async (req, res) => {
 
     const reels = [pickWeighted(), pickWeighted(), pickWeighted()];
 
-    // Считаем выигрыш
     const bananaCount = reels.filter(r => r === '🍌').length;
     const allSame = reels[0] === reels[1] && reels[1] === reels[2];
     const twoSame = !allSame && (reels[0] === reels[1] || reels[1] === reels[2] || reels[0] === reels[2]);
@@ -310,28 +308,33 @@ app.post('/api/casino/spin', async (req, res) => {
     let winAmount = 0;
     let prizeType = '';
 
-    if (bananaCount === 3) {
-      // ДЖЕКПОТ — 3 банана
-      winAmount = 400;
-      prizeType = 'jackpot';
+    // ==== ПРИЗОВЫЕ КОМБИНАЦИИ ====
+    if (allSame && reels[0] === '🍌') {
+      // 3 банана — ДЖЕКПОТ ×15
+      winAmount = Math.floor(bet * 15);
+      prizeType = 'jackpot_banana';
+    } else if (allSame && reels[0] === '🍎') {
+      // 3 яблока — ×5
+      winAmount = Math.floor(bet * 5);
+      prizeType = 'triple_apple';
+    } else if (allSame) {
+      // 3 других одинаковых — ×3
+      winAmount = Math.floor(bet * 3);
+      prizeType = 'triple';
     } else if (bananaCount === 2) {
-      // 2 банана — большой выигрыш
+      // 2 банана — +200 ₮ фикс
       winAmount = 200;
       prizeType = 'double_banana';
     } else if (bananaCount === 1) {
-      // 1 банан — выигрыш
+      // 1 банан — +100 ₮ фикс
       winAmount = 100;
       prizeType = 'banana';
-    } else if (allSame) {
-      // 3 одинаковых (не банан) — ×10
-      winAmount = Math.floor(bet * 10);
-      prizeType = 'triple';
     } else if (twoSame) {
       // 2 одинаковых — ×2
       winAmount = Math.floor(bet * 2);
       prizeType = 'double';
     } else {
-      // Все разные без банана — +5
+      // Все разные без банана — +5 фикс
       winAmount = 5;
       prizeType = 'all_diff';
     }
@@ -354,6 +357,7 @@ app.post('/api/casino/spin', async (req, res) => {
       netWin: winAmount - bet,
       prizeType,
       newTonki,
+      oldTonki: user.tonki,
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
