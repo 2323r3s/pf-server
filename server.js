@@ -238,6 +238,13 @@ const initDB = async () => {
 
 initDB();
 
+    // Голосовые сообщения — тип
+    await pool.query(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS type TEXT DEFAULT 'text'`);
+    await pool.query(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS audio TEXT`);
+
+    await pool.query(`ALTER TABLE private_messages ADD COLUMN IF NOT EXISTS type TEXT DEFAULT 'text'`);
+    await pool.query(`ALTER TABLE private_messages ADD COLUMN IF NOT EXISTS audio TEXT`);
+
 // ═══════════════════════════════════════════════════════
 // ГЛАВНАЯ
 // ═══════════════════════════════════════════════════════
@@ -631,7 +638,13 @@ app.get('/api/interest_history/:phone', async (req, res) => {
 app.get('/api/messages', async (req, res) => {
   try {
     const r = await pool.query('SELECT * FROM messages ORDER BY id ASC LIMIT 200');
-    res.json(r.rows.map(m => ({ id: m.id, from: m.from_phone, fromName: m.from_name, fromAvatar: m.from_avatar, fromStatus: m.from_status, text: m.text, time: m.time, date: m.date })));
+    res.json(r.rows.map(m => ({
+      id: m.id, from: m.from_phone, fromName: m.from_name,
+      fromAvatar: m.from_avatar, fromStatus: m.from_status,
+      text: m.text, time: m.time, date: m.date,
+      type: m.type || 'text',
+      audio: m.audio || null,
+    })));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -639,9 +652,9 @@ app.post('/api/messages', async (req, res) => {
   try {
     const m = req.body;
     await pool.query(
-      `INSERT INTO messages (id, from_phone, from_name, from_avatar, from_status, text, time, date)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (id) DO NOTHING`,
-      [m.id, m.from, m.fromName, m.fromAvatar, m.fromStatus, m.text, m.time, m.date]
+      `INSERT INTO messages (id, from_phone, from_name, from_avatar, from_status, text, time, date, type, audio)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (id) DO NOTHING`,
+      [m.id, m.from, m.fromName, m.fromAvatar, m.fromStatus, m.text || '', m.time, m.date, m.type || 'text', m.audio || null]
     );
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -653,7 +666,12 @@ app.post('/api/messages', async (req, res) => {
 app.get('/api/private/:chatId', async (req, res) => {
   try {
     const r = await pool.query('SELECT * FROM private_messages WHERE chat_id=$1 ORDER BY id ASC', [req.params.chatId]);
-    res.json(r.rows.map(m => ({ id: m.id, from: m.from_phone, fromName: m.from_name, text: m.text, time: m.time })));
+    res.json(r.rows.map(m => ({
+      id: m.id, from: m.from_phone, fromName: m.from_name,
+      text: m.text, time: m.time,
+      type: m.type || 'text',
+      audio: m.audio || null,
+    })));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -661,9 +679,9 @@ app.post('/api/private', async (req, res) => {
   try {
     const m = req.body;
     await pool.query(
-      `INSERT INTO private_messages (id, chat_id, from_phone, from_name, text, time)
-       VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (id) DO NOTHING`,
-      [m.id, m.chatId, m.from, m.fromName, m.text, m.time]
+      `INSERT INTO private_messages (id, chat_id, from_phone, from_name, text, time, type, audio)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (id) DO NOTHING`,
+      [m.id, m.chatId, m.from, m.fromName, m.text || '', m.time, m.type || 'text', m.audio || null]
     );
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
