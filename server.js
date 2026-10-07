@@ -65,6 +65,19 @@ const initDB = async () => {
       )
     `);
 
+    await pool.query(`ALTER TABLE bank ADD COLUMN IF NOT EXISTS last_interest_at TIMESTAMP`);
+    await pool.query(`ALTER TABLE bank ADD COLUMN IF NOT EXISTS total_interest INTEGER DEFAULT 0`);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS interest_history (
+        id BIGINT PRIMARY KEY,
+        phone TEXT NOT NULL,
+        amount INTEGER NOT NULL,
+        deposit INTEGER NOT NULL,
+        date TEXT NOT NULL
+      )
+    `);
+
     await pool.query(`
       CREATE TABLE IF NOT EXISTS fines (
         id BIGINT PRIMARY KEY, phone TEXT NOT NULL, reason TEXT NOT NULL, amount INTEGER NOT NULL,
@@ -205,7 +218,6 @@ const initDB = async () => {
       )
     `);
 
-    // КАЗИНО
     await pool.query(`
       CREATE TABLE IF NOT EXISTS casino_history (
         id BIGINT PRIMARY KEY,
@@ -285,10 +297,8 @@ app.post('/api/casino/spin', async (req, res) => {
       return res.status(400).json({ error: 'Недостаточно тонков', need: bet - user.tonki });
     }
 
-    // Ультра редкий банан — 3%
-    // Яблоко, вишня, персик — обычные
     const symbols = ['🍎', '🍒', '🍑', '🍌'];
-    const weights = [34, 33, 30, 3]; // 34% + 33% + 30% + 3%
+    const weights = [34, 33, 30, 3];
 
     const pickWeighted = () => {
       const total = weights.reduce((s, w) => s + w, 0);
@@ -309,29 +319,22 @@ app.post('/api/casino/spin', async (req, res) => {
     let winAmount = 0;
     let prizeType = '';
 
-    // ==== ПРИЗЫ ====
     if (allSame && reels[0] === '🍌') {
-      // 3 банана — ДЖЕКПОТ (шанс 0.0027%)
       winAmount = 500;
       prizeType = 'jackpot_banana';
     } else if (bananaCount === 2) {
-      // 2 банана — редко
       winAmount = 150;
       prizeType = 'double_banana';
     } else if (bananaCount === 1) {
-      // 1 банан
       winAmount = 50;
       prizeType = 'banana';
     } else if (allSame) {
-      // 3 одинаковых (не банан) — ×3
       winAmount = Math.floor(bet * 3);
       prizeType = 'triple';
     } else if (twoSame) {
-      // 2 одинаковых — ×2
       winAmount = Math.floor(bet * 2);
       prizeType = 'double';
     } else {
-      // Все разные — ПРОИГРЫШ
       winAmount = 0;
       prizeType = 'lose';
     }
@@ -356,6 +359,13 @@ app.post('/api/casino/spin', async (req, res) => {
       newTonki,
       oldTonki: user.tonki,
     });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/casino/history/:phone', async (req, res) => {
+  try {
+    const r = await pool.query('SELECT * FROM casino_history WHERE phone=$1 ORDER BY id DESC LIMIT 20', [req.params.phone]);
+    res.json(r.rows.map(h => ({ id: h.id, bet: h.bet, win: h.win, reels: h.reels, date: h.date })));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -542,7 +552,15 @@ app.get('/api/bank', async (req, res) => {
   try {
     const r = await pool.query('SELECT * FROM bank');
     const obj = {};
-    r.rows.forEach(x => { obj[x.phone] = { deposit: x.deposit, frozen: x.frozen, frozenAt: x.frozen_at }; });
+    r.rows.forEach(x => {
+      obj[x.phone] = {
+        deposit: x.deposit,
+        frozen: x.frozen,
+        frozenAt: x.frozen_at,
+        lastInterestAt: x.last_interest_at,
+        totalInterest: x.total_interest || 0,
+      };
+    });
     res.json(obj);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -556,6 +574,54 @@ app.post('/api/bank/:phone', async (req, res) => {
       [req.params.phone, b.deposit, b.frozen, b.frozenAt]
     );
     res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ═══════════════════════════════════════════════════════
+// ПРОЦЕНТЫ В БАНКЕ (30% годовых)
+// ═══════════════════════════════════════════════════════
+app.post('/api/bank/:phone/accrue', async (req, res) => {
+  try {
+    const phone = req.params.phone;
+
+    const bankRes = await pool.query('SELECT * FROM bank WHERE phone=$1', [phone]);
+    if (bankRes.rows.length === 0) return res.json({ accrued: 0 });
+
+    const acc = bankRes.rows[0];
+    if (!acc.deposit || acc.deposit < 30) return res.json({ accrued: 0 });
+    if (acc.frozen) return res.json({ accrued: 0 });
+
+    const now = Date.now();
+    const lastAt = acc.last_interest_at ? new Date(acc.last_interest_at).getTime() : (acc.frozen_at || now);
+    const daysPassed = (now - lastAt) / (24 * 60 * 60 * 1000);
+
+    if (daysPassed < 1) return res.json({ accrued: 0 });
+
+    const interest = Math.floor(acc.deposit * (0.3 / 365) * daysPassed);
+    if (interest <= 0) return res.json({ accrued: 0 });
+
+    const newDeposit = acc.deposit + interest;
+    const newTotal = (acc.total_interest || 0) + interest;
+
+    await pool.query(
+      `UPDATE bank SET deposit=$1, last_interest_at=NOW(), total_interest=$2 WHERE phone=$3`,
+      [newDeposit, newTotal, phone]
+    );
+
+    await pool.query(
+      `INSERT INTO interest_history (id, phone, amount, deposit, date)
+       VALUES ($1,$2,$3,$4,$5)`,
+      [Date.now(), phone, interest, acc.deposit, new Date().toLocaleString('ru-RU')]
+    );
+
+    res.json({ accrued: interest, newDeposit, daysPassed: Math.floor(daysPassed) });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/interest_history/:phone', async (req, res) => {
+  try {
+    const r = await pool.query('SELECT * FROM interest_history WHERE phone=$1 ORDER BY id DESC LIMIT 20', [req.params.phone]);
+    res.json(r.rows.map(h => ({ id: h.id, amount: h.amount, deposit: h.deposit, date: h.date })));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
