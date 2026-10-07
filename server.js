@@ -10,7 +10,7 @@ app.use(cors());
 app.use(express.json());
 
 // ═══════════════════════════════════════════════════════
-// ПОДКЛЮЧЕНИЕ К POSTGRESQL
+// ПОДКЛЮЧЕНИЕ
 // ═══════════════════════════════════════════════════════
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -21,11 +21,10 @@ pool.query('SELECT NOW()')
   .catch(err => console.error('❌ PostgreSQL ошибка:', err.stack || err.message));
 
 // ═══════════════════════════════════════════════════════
-// СОЗДАНИЕ ТАБЛИЦ
+// ТАБЛИЦЫ
 // ═══════════════════════════════════════════════════════
 const initDB = async () => {
   try {
-    // Пользователи
     await pool.query(`
       CREATE TABLE IF NOT EXISTS users (
         phone TEXT PRIMARY KEY,
@@ -39,11 +38,18 @@ const initDB = async () => {
         tonki INTEGER DEFAULT 10,
         avatar TEXT,
         registered_at TIMESTAMP DEFAULT NOW(),
-        login_changed_at TIMESTAMP
+        login_changed_at TIMESTAMP,
+        has_pension BOOLEAN DEFAULT false,
+        has_insurance BOOLEAN DEFAULT false,
+        insurance_until TIMESTAMP
       )
     `);
 
-    // Новости
+    // Добавляем поля если их нет (для старых баз)
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS has_pension BOOLEAN DEFAULT false`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS has_insurance BOOLEAN DEFAULT false`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS insurance_until TIMESTAMP`);
+
     await pool.query(`
       CREATE TABLE IF NOT EXISTS news (
         id BIGINT PRIMARY KEY,
@@ -53,7 +59,6 @@ const initDB = async () => {
       )
     `);
 
-    // Банк
     await pool.query(`
       CREATE TABLE IF NOT EXISTS bank (
         phone TEXT PRIMARY KEY,
@@ -61,7 +66,6 @@ const initDB = async () => {
       )
     `);
 
-    // Штрафы
     await pool.query(`
       CREATE TABLE IF NOT EXISTS fines (
         id BIGINT PRIMARY KEY, phone TEXT NOT NULL, reason TEXT NOT NULL, amount INTEGER NOT NULL,
@@ -69,7 +73,6 @@ const initDB = async () => {
       )
     `);
 
-    // Друзья
     await pool.query(`
       CREATE TABLE IF NOT EXISTS friends (
         user_phone TEXT NOT NULL, friend_phone TEXT NOT NULL, type TEXT NOT NULL,
@@ -77,7 +80,6 @@ const initDB = async () => {
       )
     `);
 
-    // Общий чат
     await pool.query(`
       CREATE TABLE IF NOT EXISTS messages (
         id BIGINT PRIMARY KEY, from_phone TEXT NOT NULL, from_name TEXT NOT NULL,
@@ -85,7 +87,6 @@ const initDB = async () => {
       )
     `);
 
-    // Личные чаты
     await pool.query(`
       CREATE TABLE IF NOT EXISTS private_messages (
         id BIGINT PRIMARY KEY, chat_id TEXT NOT NULL, from_phone TEXT NOT NULL,
@@ -93,10 +94,8 @@ const initDB = async () => {
       )
     `);
 
-    // Документы
     await pool.query(`CREATE TABLE IF NOT EXISTS docs (key TEXT PRIMARY KEY, content TEXT NOT NULL)`);
 
-    // Курс
     await pool.query(`
       CREATE TABLE IF NOT EXISTS rate (
         id INTEGER PRIMARY KEY DEFAULT 1,
@@ -106,7 +105,6 @@ const initDB = async () => {
     `);
     await pool.query(`INSERT INTO rate (id, to_rub) VALUES (1, 10) ON CONFLICT (id) DO NOTHING`);
 
-    // История курса
     await pool.query(`
       CREATE TABLE IF NOT EXISTS rate_history (
         id SERIAL PRIMARY KEY,
@@ -115,7 +113,6 @@ const initDB = async () => {
       )
     `);
 
-    // Цель курса
     await pool.query(`
       CREATE TABLE IF NOT EXISTS rate_target (
         id INTEGER PRIMARY KEY DEFAULT 1,
@@ -124,7 +121,6 @@ const initDB = async () => {
       )
     `);
 
-    // Банк ПФ
     await pool.query(`
       CREATE TABLE IF NOT EXISTS bank_pf (
         id INTEGER PRIMARY KEY DEFAULT 1, amount BIGINT NOT NULL DEFAULT 3124000000000
@@ -132,7 +128,6 @@ const initDB = async () => {
     `);
     await pool.query(`INSERT INTO bank_pf (id, amount) VALUES (1, 3124000000000) ON CONFLICT (id) DO NOTHING`);
 
-    // Апелляции
     await pool.query(`
       CREATE TABLE IF NOT EXISTS appeals (
         id BIGINT PRIMARY KEY,
@@ -150,7 +145,7 @@ const initDB = async () => {
 
     console.log('✅ Таблицы готовы');
   } catch (err) {
-    console.error('❌ Ошибка создания таблиц:', err.stack || err.message);
+    console.error('❌ Ошибка таблиц:', err.stack || err.message);
   }
 };
 
@@ -177,13 +172,15 @@ app.post('/api/users', async (req, res) => {
   try {
     const u = req.body;
     await pool.query(
-      `INSERT INTO users (phone, login, password, first_name, last_name, code, paradox, tripcode, status, aura, tonki, avatar)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+      `INSERT INTO users (phone, login, password, first_name, last_name, code, paradox, tripcode, status, aura, tonki, avatar, has_pension, has_insurance, insurance_until)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
        ON CONFLICT (phone) DO UPDATE SET
          login=$2, password=$3, first_name=$4, last_name=$5, code=$6,
-         paradox=$7, tripcode=$8, status=$9, aura=$10, tonki=$11, avatar=$12`,
+         paradox=$7, tripcode=$8, status=$9, aura=$10, tonki=$11, avatar=$12,
+         has_pension=$13, has_insurance=$14, insurance_until=$15`,
       [u.phone, u.login, u.password, u.firstName, u.lastName, u.code, u.paradox,
-       u.tripcode, u.status, u.aura, u.tonki, u.avatar]
+       u.tripcode, u.status, u.aura, u.tonki, u.avatar,
+       u.hasPension || false, u.hasInsurance || false, u.insuranceUntil || null]
     );
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -273,7 +270,7 @@ app.post('/api/messages', async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════
-// ЛИЧНЫЕ СООБЩЕНИЯ
+// ЛИЧНЫЕ
 // ═══════════════════════════════════════════════════════
 app.get('/api/private/:chatId', async (req, res) => {
   try {
@@ -404,9 +401,6 @@ app.post('/api/rate', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// ═══════════════════════════════════════════════════════
-// ИСТОРИЯ КУРСА
-// ═══════════════════════════════════════════════════════
 app.get('/api/rate_history', async (req, res) => {
   try {
     const r = await pool.query('SELECT rate, time FROM rate_history ORDER BY id ASC LIMIT 200');
@@ -414,22 +408,13 @@ app.get('/api/rate_history', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// ═══════════════════════════════════════════════════════
-// ЦЕЛЬ КУРСА
-// ═══════════════════════════════════════════════════════
 app.get('/api/rate_target', async (req, res) => {
   try {
     const r = await pool.query('SELECT * FROM rate_target WHERE id=1');
     if (r.rows.length === 0) return res.json(null);
     const t = r.rows[0];
     if (!t.target || !t.deadline) return res.json(null);
-    res.json({
-      target: parseFloat(t.target),
-      startRate: parseFloat(t.start_rate),
-      startedAt: t.started_at,
-      deadline: t.deadline,
-      createdBy: t.created_by,
-    });
+    res.json({ target: parseFloat(t.target), startRate: parseFloat(t.start_rate), startedAt: t.started_at, deadline: t.deadline, createdBy: t.created_by });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -443,8 +428,7 @@ app.post('/api/rate_target', async (req, res) => {
     await pool.query(
       `INSERT INTO rate_target (id, target, start_rate, started_at, deadline, created_by)
        VALUES (1, $1, $2, $3, $4, $5)
-       ON CONFLICT (id) DO UPDATE SET
-         target=$1, start_rate=$2, started_at=$3, deadline=$4, created_by=$5`,
+       ON CONFLICT (id) DO UPDATE SET target=$1, start_rate=$2, started_at=$3, deadline=$4, created_by=$5`,
       [t.target, t.startRate, t.startedAt, t.deadline, t.createdBy]
     );
     res.json({ ok: true });
@@ -475,18 +459,7 @@ app.post('/api/bank_pf', async (req, res) => {
 app.get('/api/appeals', async (req, res) => {
   try {
     const r = await pool.query('SELECT * FROM appeals ORDER BY id DESC');
-    res.json(r.rows.map(a => ({
-      id: a.id,
-      fineId: a.fine_id,
-      userPhone: a.user_phone,
-      userName: a.user_name,
-      reason: a.reason,
-      status: a.status,
-      prComment: a.pr_comment,
-      createdAt: a.created_at,
-      resolvedAt: a.resolved_at,
-      resolvedBy: a.resolved_by,
-    })));
+    res.json(r.rows.map(a => ({ id: a.id, fineId: a.fine_id, userPhone: a.user_phone, userName: a.user_name, reason: a.reason, status: a.status, prComment: a.pr_comment, createdAt: a.created_at, resolvedAt: a.resolved_at, resolvedBy: a.resolved_by })));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -496,8 +469,7 @@ app.post('/api/appeals', async (req, res) => {
     await pool.query(
       `INSERT INTO appeals (id, fine_id, user_phone, user_name, reason, status, created_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7)
-       ON CONFLICT (id) DO UPDATE SET
-         status=$6, pr_comment=$8, resolved_at=$9, resolved_by=$10`,
+       ON CONFLICT (id) DO UPDATE SET status=$6, pr_comment=$8, resolved_at=$9, resolved_by=$10`,
       [a.id, a.fineId, a.userPhone, a.userName, a.reason, a.status || 'pending', a.createdAt, a.prComment || null, a.resolvedAt || null, a.resolvedBy || null]
     );
     res.json({ ok: true });
@@ -511,7 +483,6 @@ app.delete('/api/appeals/:id', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Одобрить/отклонить апелляцию
 app.post('/api/appeals/:id/resolve', async (req, res) => {
   try {
     const { status, prComment, resolvedBy } = req.body;
@@ -524,7 +495,6 @@ app.post('/api/appeals/:id/resolve', async (req, res) => {
       [status, prComment || null, new Date().toISOString(), resolvedBy || null, req.params.id]
     );
 
-    // Если одобрено — удаляем штраф
     if (status === 'approved') {
       await pool.query('DELETE FROM fines WHERE id=$1', [appeal.fine_id]);
     }
@@ -545,7 +515,6 @@ const tickRate = async () => {
 
     const rateRes = await pool.query('SELECT to_rub FROM rate WHERE id=1');
     const currentRate = parseFloat(rateRes.rows[0]?.to_rub || 10);
-
     const startTime = new Date(t.started_at).getTime();
     const endTime = new Date(t.deadline).getTime();
     const now = Date.now();
@@ -556,26 +525,20 @@ const tickRate = async () => {
         await pool.query('INSERT INTO rate_history (rate) VALUES ($1)', [t.target]);
       }
       await pool.query('DELETE FROM rate_target WHERE id=1');
-      console.log(`🎯 Курс достиг цели: ${t.target} ₽`);
       return;
     }
 
     const total = endTime - startTime;
     const elapsed = now - startTime;
     const progress = Math.min(1, Math.max(0, elapsed / total));
-    const startRate = parseFloat(t.start_rate);
-    const targetRate = parseFloat(t.target);
-    const expectedRate = startRate + (targetRate - startRate) * progress;
+    const expectedRate = parseFloat(t.start_rate) + (parseFloat(t.target) - parseFloat(t.start_rate)) * progress;
     const rounded = Math.round(expectedRate * 100) / 100;
 
     if (Math.abs(rounded - currentRate) > 0.01) {
       await pool.query('UPDATE rate SET to_rub=$1, updated_at=NOW(), updated_by=$2 WHERE id=1', [rounded, 'auto']);
       await pool.query('INSERT INTO rate_history (rate) VALUES ($1)', [rounded]);
-      console.log(`📈 Курс: ${currentRate} → ${rounded} (${Math.round(progress * 100)}%)`);
     }
-  } catch (err) {
-    console.error('❌ tickRate ошибка:', err.message);
-  }
+  } catch (err) { console.error('tickRate:', err.message); }
 };
 
 setInterval(tickRate, 30 * 1000);
