@@ -97,6 +97,97 @@ const initDB = async () => {
       )
     `);
     await pool.query(`INSERT INTO bank_pf (id, amount) VALUES (1, 3124000000000) ON CONFLICT (id) DO NOTHING`);
+
+    // ── Контакты ──
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS contacts (
+        user_phone TEXT NOT NULL,
+        contact_phone TEXT NOT NULL,
+        first_name TEXT, last_name TEXT, login TEXT, status TEXT, avatar TEXT,
+        PRIMARY KEY (user_phone, contact_phone)
+      )
+    `);
+
+    // ── Заблокированные ──
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS blocked (
+        user_phone TEXT NOT NULL,
+        blocked_phone TEXT NOT NULL,
+        PRIMARY KEY (user_phone, blocked_phone)
+      )
+    `);
+
+    // ── Заявки на переписку (inbox) ──
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS inbox (
+        user_phone TEXT NOT NULL,
+        from_phone TEXT NOT NULL,
+        first_name TEXT, last_name TEXT, login TEXT, status TEXT, avatar TEXT,
+        first_message TEXT, date TEXT,
+        PRIMARY KEY (user_phone, from_phone)
+      )
+    `);
+
+    // ── Прочитано (общий чат + личные) ──
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS last_read (
+        user_phone TEXT NOT NULL,
+        chat_id TEXT NOT NULL,
+        last_id BIGINT NOT NULL DEFAULT 0,
+        PRIMARY KEY (user_phone, chat_id)
+      )
+    `);
+
+    // ── Чаты новичков (с ПР) ──
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS newbie_chats (
+        chat_key TEXT PRIMARY KEY,
+        name TEXT,
+        started_at TEXT,
+        unread_by_pr BOOLEAN DEFAULT false,
+        messages JSONB DEFAULT '[]'::jsonb
+      )
+    `);
+
+    // ── Налоги ──
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS tax_paid (
+        phone TEXT PRIMARY KEY,
+        paid_at TIMESTAMP NOT NULL
+      )
+    `);
+
+    // ── Переводы ──
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS transfers (
+        id BIGINT PRIMARY KEY,
+        from_phone TEXT NOT NULL, from_name TEXT,
+        to_phone TEXT NOT NULL, to_name TEXT,
+        amount INTEGER NOT NULL, comment TEXT, date TEXT
+      )
+    `);
+
+    // ── История курса ──
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS rate_history (
+        id SERIAL PRIMARY KEY,
+        rate NUMERIC NOT NULL,
+        time TIMESTAMP DEFAULT NOW()
+      )
+    `);
+
+    // ── Цель курса ──
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS rate_target (
+        id INTEGER PRIMARY KEY DEFAULT 1,
+        target NUMERIC, start_rate NUMERIC,
+        started_at TIMESTAMP, deadline TIMESTAMP, created_by TEXT
+      )
+    `);
+
+    // ── Логин менялся ──
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS login_changed_at TIMESTAMP`);
+
     console.log('✅ Таблицы готовы');
   } catch (err) {
     console.error('❌ Ошибка создания таблиц:', err.stack || err.message || JSON.stringify(err));
