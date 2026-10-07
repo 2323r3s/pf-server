@@ -285,8 +285,11 @@ app.post('/api/casino/spin', async (req, res) => {
       return res.status(400).json({ error: 'Недостаточно тонков', need: bet - user.tonki });
     }
 
-    const symbols = ['🍎', '🍇', '🍇', '🍌'];
-    const weights = [30, 25, 25, 20];
+    // Символы: яблоко, вишня, слива, банан
+    // Банан — ультра редкий (5%)
+    const symbols = ['🍎', '🍒', '🍑', '🍌'];
+    const weights = [35, 35, 25, 5]; // шансы: 35%, 35%, 25%, 5%
+
     const pickWeighted = () => {
       const total = weights.reduce((s, w) => s + w, 0);
       let r = Math.random() * total;
@@ -299,11 +302,40 @@ app.post('/api/casino/spin', async (req, res) => {
 
     const reels = [pickWeighted(), pickWeighted(), pickWeighted()];
 
-    let multiplier = 0;
-    if (reels[0] === reels[1] && reels[1] === reels[2]) multiplier = 10;
-    else if (reels[0] === reels[1] || reels[1] === reels[2] || reels[0] === reels[2]) multiplier = 2;
+    // Считаем выигрыш
+    const bananaCount = reels.filter(r => r === '🍌').length;
+    const allSame = reels[0] === reels[1] && reels[1] === reels[2];
+    const twoSame = !allSame && (reels[0] === reels[1] || reels[1] === reels[2] || reels[0] === reels[2]);
 
-    const winAmount = multiplier > 0 ? Math.floor(bet * multiplier) : 0;
+    let winAmount = 0;
+    let prizeType = '';
+
+    if (bananaCount === 3) {
+      // ДЖЕКПОТ — 3 банана
+      winAmount = 400;
+      prizeType = 'jackpot';
+    } else if (bananaCount === 2) {
+      // 2 банана — большой выигрыш
+      winAmount = 200;
+      prizeType = 'double_banana';
+    } else if (bananaCount === 1) {
+      // 1 банан — выигрыш
+      winAmount = 100;
+      prizeType = 'banana';
+    } else if (allSame) {
+      // 3 одинаковых (не банан) — ×10
+      winAmount = Math.floor(bet * 10);
+      prizeType = 'triple';
+    } else if (twoSame) {
+      // 2 одинаковых — ×2
+      winAmount = Math.floor(bet * 2);
+      prizeType = 'double';
+    } else {
+      // Все разные без банана — +5
+      winAmount = 5;
+      prizeType = 'all_diff';
+    }
+
     const newTonki = user.tonki - bet + winAmount;
 
     await pool.query('UPDATE users SET tonki=$1 WHERE phone=$2', [newTonki, phone]);
@@ -314,14 +346,15 @@ app.post('/api/casino/spin', async (req, res) => {
       [Date.now(), phone, name || 'ЖИ', bet, winAmount, reels.join(''), new Date().toLocaleString('ru-RU')]
     );
 
-    res.json({ ok: true, reels, bet, winAmount, netWin: winAmount - bet, multiplier, newTonki });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.get('/api/casino/history/:phone', async (req, res) => {
-  try {
-    const r = await pool.query('SELECT * FROM casino_history WHERE phone=$1 ORDER BY id DESC LIMIT 20', [req.params.phone]);
-    res.json(r.rows.map(h => ({ id: h.id, bet: h.bet, win: h.win, reels: h.reels, date: h.date })));
+    res.json({
+      ok: true,
+      reels,
+      bet,
+      winAmount,
+      netWin: winAmount - bet,
+      prizeType,
+      newTonki,
+    });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
