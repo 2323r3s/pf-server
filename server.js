@@ -166,11 +166,43 @@ const initDB = async () => {
       )
     `);
 
-    // Зарплаты — когда кто получил
     await pool.query(`
       CREATE TABLE IF NOT EXISTS salary_paid (
         phone TEXT PRIMARY KEY,
         last_paid TEXT NOT NULL
+      )
+    `);
+
+    // ── ВЫБОРЫ ──
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS elections (
+        id INTEGER PRIMARY KEY DEFAULT 1,
+        started_at TIMESTAMP NOT NULL,
+        ends_at TIMESTAMP NOT NULL,
+        finished BOOLEAN DEFAULT false,
+        winner_phone TEXT,
+        winner_name TEXT
+      )
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS election_candidates (
+        election_id INTEGER NOT NULL,
+        phone TEXT NOT NULL,
+        name TEXT NOT NULL,
+        program TEXT,
+        registered_at TIMESTAMP DEFAULT NOW(),
+        PRIMARY KEY (election_id, phone)
+      )
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS election_votes (
+        election_id INTEGER NOT NULL,
+        voter_phone TEXT NOT NULL,
+        candidate_phone TEXT NOT NULL,
+        voted_at TIMESTAMP DEFAULT NOW(),
+        PRIMARY KEY (election_id, voter_phone)
       )
     `);
 
@@ -220,6 +252,156 @@ app.post('/api/users', async (req, res) => {
 app.delete('/api/users/:phone', async (req, res) => {
   try {
     await pool.query('DELETE FROM users WHERE phone=$1', [req.params.phone]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ═══════════════════════════════════════════════════════
+// ВЫБОРЫ
+// ═══════════════════════════════════════════════════════
+
+// Получить текущие выборы (если есть)
+app.get('/api/elections/current', async (req, res) => {
+  try {
+    const r = await pool.query('SELECT * FROM elections WHERE id=1');
+    if (r.rows.length === 0) return res.json(null);
+    const e = r.rows[0];
+
+    const candidates = await pool.query(
+      'SELECT * FROM election_candidates WHERE election_id=$1 ORDER BY registered_at ASC',
+      [e.id]
+    );
+
+    const votes = await pool.query(
+      'SELECT candidate_phone, COUNT(*) AS cnt FROM election_votes WHERE election_id=$1 GROUP BY candidate_phone',
+      [e.id]
+    );
+    const voteCounts = {};
+    votes.rows.forEach(v => { voteCounts[v.candidate_phone] = parseInt(v.cnt); });
+
+    res.json({
+      id: e.id,
+      startedAt: e.started_at,
+      endsAt: e.ends_at,
+      finished: e.finished,
+      winnerPhone: e.winner_phone,
+      winnerName: e.winner_name,
+      candidates: candidates.rows.map(c => ({
+        phone: c.phone,
+        name: c.name,
+        program: c.program,
+        votes: voteCounts[c.phone] || 0,
+      })),
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Создать выборы (только ПР)
+app.post('/api/elections/create', async (req, res) => {
+  try {
+    const { startedAt, endsAt } = req.body;
+    await pool.query('DELETE FROM election_candidates WHERE election_id=1');
+    await pool.query('DELETE FROM election_votes WHERE election_id=1');
+    await pool.query('DELETE FROM elections WHERE id=1');
+    await pool.query(
+      `INSERT INTO elections (id, started_at, ends_at, finished)
+       VALUES (1, $1, $2, false)`,
+      [startedAt, endsAt]
+    );
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Выдвинуться (только ЖИ)
+app.post('/api/elections/register', async (req, res) => {
+  try {
+    const { phone, name, program } = req.body;
+    await pool.query(
+      `INSERT INTO election_candidates (election_id, phone, name, program)
+       VALUES (1, $1, $2, $3)
+       ON CONFLICT (election_id, phone) DO UPDATE SET program=$3`,
+      [phone, name, program]
+    );
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Снять кандидатуру
+app.delete('/api/elections/candidates/:phone', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM election_candidates WHERE election_id=1 AND phone=$1', [req.params.phone]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Голосовать
+app.post('/api/elections/vote', async (req, res) => {
+  try {
+    const { voterPhone, candidatePhone } = req.body;
+    await pool.query(
+      `INSERT INTO election_votes (election_id, voter_phone, candidate_phone)
+       VALUES (1, $1, $2)
+       ON CONFLICT (election_id, voter_phone) DO UPDATE SET candidate_phone=$2, voted_at=NOW()`,
+      [voterPhone, candidatePhone]
+    );
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Проверить мой голос
+app.get('/api/elections/my_vote/:phone', async (req, res) => {
+  try {
+    const r = await pool.query(
+      'SELECT candidate_phone FROM election_votes WHERE election_id=1 AND voter_phone=$1',
+      [req.params.phone]
+    );
+    res.json({ candidatePhone: r.rows[0]?.candidate_phone || null });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Завершить выборы (только ПР)
+app.post('/api/elections/finish', async (req, res) => {
+  try {
+    const cands = await pool.query(
+      `SELECT c.phone, c.name, COALESCE(COUNT(v.voter_phone), 0) AS votes
+       FROM election_candidates c
+       LEFT JOIN election_votes v ON v.candidate_phone = c.phone AND v.election_id = 1
+       WHERE c.election_id = 1
+       GROUP BY c.phone, c.name
+       ORDER BY votes DESC, c.phone ASC`
+    );
+
+    if (cands.rows.length === 0) {
+      return res.status(400).json({ error: 'No candidates' });
+    }
+
+    const winner = cands.rows[0];
+    const winnerPhone = winner.phone;
+    const winnerName = winner.name;
+
+    // Обновляем юзера — новый ПВ
+    await pool.query('UPDATE users SET status=$1 WHERE phone=$2', ['ПВ', winnerPhone]);
+    // Снимаем ПВ с других
+    await pool.query('UPDATE users SET status=$1 WHERE status=$2 AND phone<>$3', ['ЖИ', 'ПВ', winnerPhone]);
+    // Даём 100 тонков
+    await pool.query('UPDATE users SET tonki = tonki + 100 WHERE phone=$1', [winnerPhone]);
+
+    // Финалим выборы
+    await pool.query(
+      'UPDATE elections SET finished=true, winner_phone=$1, winner_name=$2 WHERE id=1',
+      [winnerPhone, winnerName]
+    );
+
+    res.json({ ok: true, winnerPhone, winnerName });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Сбросить выборы (только ПР)
+app.delete('/api/elections', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM election_votes WHERE election_id=1');
+    await pool.query('DELETE FROM election_candidates WHERE election_id=1');
+    await pool.query('DELETE FROM elections WHERE id=1');
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -299,8 +481,11 @@ app.delete('/api/news/:id', async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════
-// БАНК
+// БАНК / ЧАТЫ / ШТРАФЫ / ДРУЗЬЯ / ДОКУМЕНТЫ / КУРС
+// (такие же как раньше — вставь из прошлого server.js)
 // ═══════════════════════════════════════════════════════
+
+// БАНК
 app.get('/api/bank', async (req, res) => {
   try {
     const r = await pool.query('SELECT * FROM bank');
@@ -322,9 +507,7 @@ app.post('/api/bank/:phone', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// ═══════════════════════════════════════════════════════
 // ОБЩИЙ ЧАТ
-// ═══════════════════════════════════════════════════════
 app.get('/api/messages', async (req, res) => {
   try {
     const r = await pool.query('SELECT * FROM messages ORDER BY id ASC LIMIT 200');
@@ -344,9 +527,7 @@ app.post('/api/messages', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// ═══════════════════════════════════════════════════════
 // ЛИЧНЫЕ
-// ═══════════════════════════════════════════════════════
 app.get('/api/private/:chatId', async (req, res) => {
   try {
     const r = await pool.query('SELECT * FROM private_messages WHERE chat_id=$1 ORDER BY id ASC', [req.params.chatId]);
@@ -366,9 +547,7 @@ app.post('/api/private', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// ═══════════════════════════════════════════════════════
 // ШТРАФЫ
-// ═══════════════════════════════════════════════════════
 app.get('/api/fines', async (req, res) => {
   try {
     const r = await pool.query('SELECT * FROM fines ORDER BY id DESC');
@@ -396,9 +575,7 @@ app.delete('/api/fines/:id', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// ═══════════════════════════════════════════════════════
 // ДРУЗЬЯ
-// ═══════════════════════════════════════════════════════
 app.get('/api/friends', async (req, res) => {
   try {
     const r = await pool.query('SELECT * FROM friends');
@@ -433,9 +610,7 @@ app.delete('/api/friends', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// ═══════════════════════════════════════════════════════
 // ДОКУМЕНТЫ
-// ═══════════════════════════════════════════════════════
 app.get('/api/docs', async (req, res) => {
   try {
     const r = await pool.query('SELECT * FROM docs');
@@ -456,9 +631,7 @@ app.post('/api/docs', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// ═══════════════════════════════════════════════════════
 // КУРС
-// ═══════════════════════════════════════════════════════
 app.get('/api/rate', async (req, res) => {
   try {
     const r = await pool.query('SELECT * FROM rate WHERE id=1');
@@ -510,9 +683,7 @@ app.post('/api/rate_target', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// ═══════════════════════════════════════════════════════
 // БАНК ПФ
-// ═══════════════════════════════════════════════════════
 app.get('/api/bank_pf', async (req, res) => {
   try {
     const r = await pool.query('SELECT amount FROM bank_pf WHERE id=1');
@@ -528,9 +699,7 @@ app.post('/api/bank_pf', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// ═══════════════════════════════════════════════════════
 // АПЕЛЛЯЦИИ
-// ═══════════════════════════════════════════════════════
 app.get('/api/appeals', async (req, res) => {
   try {
     const r = await pool.query('SELECT * FROM appeals ORDER BY id DESC');
@@ -551,13 +720,6 @@ app.post('/api/appeals', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.delete('/api/appeals/:id', async (req, res) => {
-  try {
-    await pool.query('DELETE FROM appeals WHERE id=$1', [req.params.id]);
-    res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
 app.post('/api/appeals/:id/resolve', async (req, res) => {
   try {
     const { status, prComment, resolvedBy } = req.body;
@@ -573,28 +735,15 @@ app.post('/api/appeals/:id/resolve', async (req, res) => {
     if (status === 'approved') {
       await pool.query('DELETE FROM fines WHERE id=$1', [appeal.fine_id]);
     }
-
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// ═══════════════════════════════════════════════════════
-// ЗАЯВКИ НА ДОКУМЕНТЫ
-// ═══════════════════════════════════════════════════════
+// ДОКУМЕНТЫ
 app.get('/api/doc_requests', async (req, res) => {
   try {
     const r = await pool.query('SELECT * FROM doc_requests ORDER BY id DESC');
-    res.json(r.rows.map(a => ({
-      id: a.id,
-      userPhone: a.user_phone,
-      userName: a.user_name,
-      docType: a.doc_type,
-      status: a.status,
-      prComment: a.pr_comment,
-      createdAt: a.created_at,
-      resolvedAt: a.resolved_at,
-      resolvedBy: a.resolved_by,
-    })));
+    res.json(r.rows.map(a => ({ id: a.id, userPhone: a.user_phone, userName: a.user_name, docType: a.doc_type, status: a.status, prComment: a.pr_comment, createdAt: a.created_at, resolvedAt: a.resolved_at, resolvedBy: a.resolved_by })));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -629,20 +778,14 @@ app.post('/api/doc_requests/:id/resolve', async (req, res) => {
         await pool.query('UPDATE users SET has_pension=true WHERE phone=$1', [request.user_phone]);
       } else if (request.doc_type === 'insurance') {
         const until = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString();
-        await pool.query(
-          'UPDATE users SET has_insurance=true, insurance_until=$1 WHERE phone=$2',
-          [until, request.user_phone]
-        );
+        await pool.query('UPDATE users SET has_insurance=true, insurance_until=$1 WHERE phone=$2', [until, request.user_phone]);
       }
     }
-
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// ═══════════════════════════════════════════════════════
 // АВТО-КУРС
-// ═══════════════════════════════════════════════════════
 const tickRate = async () => {
   try {
     const targetRes = await pool.query('SELECT * FROM rate_target WHERE id=1');
