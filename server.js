@@ -285,9 +285,10 @@ app.post('/api/casino/spin', async (req, res) => {
       return res.status(400).json({ error: 'Недостаточно тонков', need: bet - user.tonki });
     }
 
-    // Символы: яблоко, вишня, персик, банан (банан редкий)
+    // Ультра редкий банан — 3%
+    // Яблоко, вишня, персик — обычные
     const symbols = ['🍎', '🍒', '🍑', '🍌'];
-    const weights = [35, 35, 25, 5];
+    const weights = [34, 33, 30, 3]; // 34% + 33% + 30% + 3%
 
     const pickWeighted = () => {
       const total = weights.reduce((s, w) => s + w, 0);
@@ -308,35 +309,31 @@ app.post('/api/casino/spin', async (req, res) => {
     let winAmount = 0;
     let prizeType = '';
 
-    // ==== ПРИЗОВЫЕ КОМБИНАЦИИ ====
+    // ==== ПРИЗЫ ====
     if (allSame && reels[0] === '🍌') {
-      // 3 банана — ДЖЕКПОТ ×15
-      winAmount = Math.floor(bet * 15);
+      // 3 банана — ДЖЕКПОТ (шанс 0.0027%)
+      winAmount = 500;
       prizeType = 'jackpot_banana';
-    } else if (allSame && reels[0] === '🍎') {
-      // 3 яблока — ×5
-      winAmount = Math.floor(bet * 5);
-      prizeType = 'triple_apple';
-    } else if (allSame) {
-      // 3 других одинаковых — ×3
-      winAmount = Math.floor(bet * 3);
-      prizeType = 'triple';
     } else if (bananaCount === 2) {
-      // 2 банана — +200 ₮ фикс
-      winAmount = 200;
+      // 2 банана — редко
+      winAmount = 150;
       prizeType = 'double_banana';
     } else if (bananaCount === 1) {
-      // 1 банан — +100 ₮ фикс
-      winAmount = 100;
+      // 1 банан
+      winAmount = 50;
       prizeType = 'banana';
+    } else if (allSame) {
+      // 3 одинаковых (не банан) — ×3
+      winAmount = Math.floor(bet * 3);
+      prizeType = 'triple';
     } else if (twoSame) {
       // 2 одинаковых — ×2
       winAmount = Math.floor(bet * 2);
       prizeType = 'double';
     } else {
-      // Все разные без банана — +5 фикс
-      winAmount = 5;
-      prizeType = 'all_diff';
+      // Все разные — ПРОИГРЫШ
+      winAmount = 0;
+      prizeType = 'lose';
     }
 
     const newTonki = user.tonki - bet + winAmount;
