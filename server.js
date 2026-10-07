@@ -156,7 +156,6 @@ const initDB = async () => {
       )
     `);
 
-    // История ауры
     await pool.query(`
       CREATE TABLE IF NOT EXISTS aura_history (
         id BIGINT PRIMARY KEY,
@@ -164,6 +163,14 @@ const initDB = async () => {
         delta INTEGER NOT NULL,
         reason TEXT NOT NULL,
         date TEXT NOT NULL
+      )
+    `);
+
+    // Зарплаты — когда кто получил
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS salary_paid (
+        phone TEXT PRIMARY KEY,
+        last_paid TEXT NOT NULL
       )
     `);
 
@@ -218,18 +225,34 @@ app.delete('/api/users/:phone', async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════
+// ЗАРПЛАТЫ
+// ═══════════════════════════════════════════════════════
+app.get('/api/salary_paid/:phone', async (req, res) => {
+  try {
+    const r = await pool.query('SELECT last_paid FROM salary_paid WHERE phone=$1', [req.params.phone]);
+    res.json({ lastPaid: r.rows[0]?.last_paid || null });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/salary_paid', async (req, res) => {
+  try {
+    const { phone, lastPaid } = req.body;
+    await pool.query(
+      `INSERT INTO salary_paid (phone, last_paid) VALUES ($1,$2)
+       ON CONFLICT (phone) DO UPDATE SET last_paid=$2`,
+      [phone, lastPaid]
+    );
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ═══════════════════════════════════════════════════════
 // ИСТОРИЯ АУРЫ
 // ═══════════════════════════════════════════════════════
 app.get('/api/aura_history/:phone', async (req, res) => {
   try {
     const r = await pool.query('SELECT * FROM aura_history WHERE phone=$1 ORDER BY id DESC LIMIT 100', [req.params.phone]);
-    res.json(r.rows.map(h => ({
-      id: h.id,
-      phone: h.phone,
-      delta: h.delta,
-      reason: h.reason,
-      date: h.date,
-    })));
+    res.json(r.rows.map(h => ({ id: h.id, phone: h.phone, delta: h.delta, reason: h.reason, date: h.date })));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
