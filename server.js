@@ -10,7 +10,7 @@ app.use(cors());
 app.use(express.json());
 
 // ═══════════════════════════════════════════════════════
-// ПОДКЛЮЧЕНИЕ К POSTGRESQL (ZevCloud)
+// ПОДКЛЮЧЕНИЕ К POSTGRESQL
 // ═══════════════════════════════════════════════════════
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -131,6 +131,22 @@ const initDB = async () => {
       )
     `);
     await pool.query(`INSERT INTO bank_pf (id, amount) VALUES (1, 3124000000000) ON CONFLICT (id) DO NOTHING`);
+
+    // Апелляции
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS appeals (
+        id BIGINT PRIMARY KEY,
+        fine_id BIGINT NOT NULL,
+        user_phone TEXT NOT NULL,
+        user_name TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        status TEXT DEFAULT 'pending',
+        pr_comment TEXT,
+        created_at TEXT NOT NULL,
+        resolved_at TEXT,
+        resolved_by TEXT
+      )
+    `);
 
     console.log('✅ Таблицы готовы');
   } catch (err) {
@@ -301,6 +317,13 @@ app.post('/api/fines', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+app.delete('/api/fines/:id', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM fines WHERE id=$1', [req.params.id]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // ═══════════════════════════════════════════════════════
 // ДРУЗЬЯ
 // ═══════════════════════════════════════════════════════
@@ -447,7 +470,71 @@ app.post('/api/bank_pf', async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════
-// АВТО-КУРС — меняет курс каждые 30 сек
+// АПЕЛЛЯЦИИ
+// ═══════════════════════════════════════════════════════
+app.get('/api/appeals', async (req, res) => {
+  try {
+    const r = await pool.query('SELECT * FROM appeals ORDER BY id DESC');
+    res.json(r.rows.map(a => ({
+      id: a.id,
+      fineId: a.fine_id,
+      userPhone: a.user_phone,
+      userName: a.user_name,
+      reason: a.reason,
+      status: a.status,
+      prComment: a.pr_comment,
+      createdAt: a.created_at,
+      resolvedAt: a.resolved_at,
+      resolvedBy: a.resolved_by,
+    })));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/appeals', async (req, res) => {
+  try {
+    const a = req.body;
+    await pool.query(
+      `INSERT INTO appeals (id, fine_id, user_phone, user_name, reason, status, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)
+       ON CONFLICT (id) DO UPDATE SET
+         status=$6, pr_comment=$8, resolved_at=$9, resolved_by=$10`,
+      [a.id, a.fineId, a.userPhone, a.userName, a.reason, a.status || 'pending', a.createdAt, a.prComment || null, a.resolvedAt || null, a.resolvedBy || null]
+    );
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/appeals/:id', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM appeals WHERE id=$1', [req.params.id]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Одобрить/отклонить апелляцию
+app.post('/api/appeals/:id/resolve', async (req, res) => {
+  try {
+    const { status, prComment, resolvedBy } = req.body;
+    const appealRes = await pool.query('SELECT * FROM appeals WHERE id=$1', [req.params.id]);
+    if (appealRes.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    const appeal = appealRes.rows[0];
+
+    await pool.query(
+      `UPDATE appeals SET status=$1, pr_comment=$2, resolved_at=$3, resolved_by=$4 WHERE id=$5`,
+      [status, prComment || null, new Date().toISOString(), resolvedBy || null, req.params.id]
+    );
+
+    // Если одобрено — удаляем штраф
+    if (status === 'approved') {
+      await pool.query('DELETE FROM fines WHERE id=$1', [appeal.fine_id]);
+    }
+
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ═══════════════════════════════════════════════════════
+// АВТО-КУРС
 // ═══════════════════════════════════════════════════════
 const tickRate = async () => {
   try {
@@ -464,7 +551,6 @@ const tickRate = async () => {
     const now = Date.now();
 
     if (now >= endTime) {
-      // Дошли до цели — фиксируем и удаляем цель
       if (Math.abs(currentRate - parseFloat(t.target)) > 0.001) {
         await pool.query('UPDATE rate SET to_rub=$1, updated_at=NOW(), updated_by=$2 WHERE id=1', [t.target, 'auto']);
         await pool.query('INSERT INTO rate_history (rate) VALUES ($1)', [t.target]);
@@ -474,15 +560,12 @@ const tickRate = async () => {
       return;
     }
 
-    // Линейная интерполяция
     const total = endTime - startTime;
     const elapsed = now - startTime;
     const progress = Math.min(1, Math.max(0, elapsed / total));
     const startRate = parseFloat(t.start_rate);
     const targetRate = parseFloat(t.target);
     const expectedRate = startRate + (targetRate - startRate) * progress;
-
-    // Округляем до 2 знаков
     const rounded = Math.round(expectedRate * 100) / 100;
 
     if (Math.abs(rounded - currentRate) > 0.01) {
@@ -495,9 +578,7 @@ const tickRate = async () => {
   }
 };
 
-// Запускаем раз в 30 секунд
 setInterval(tickRate, 30 * 1000);
-// И сразу при старте
 setTimeout(tickRate, 5000);
 
 // ═══════════════════════════════════════════════════════
