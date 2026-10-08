@@ -1034,44 +1034,6 @@ app.post('/api/doc_requests/:id/resolve', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// ═══════════════════════════════════════════════════════
-// АВТО-КУРС
-// ═══════════════════════════════════════════════════════
-const tickRate = async () => {
-  try {
-    const targetRes = await pool.query('SELECT * FROM rate_target WHERE id=1');
-    if (targetRes.rows.length === 0) return;
-    const t = targetRes.rows[0];
-    if (!t.target || !t.deadline) return;
-
-    const rateRes = await pool.query('SELECT to_rub FROM rate WHERE id=1');
-    const currentRate = parseFloat(rateRes.rows[0]?.to_rub || 10);
-    const startTime = new Date(t.started_at).getTime();
-    const endTime = new Date(t.deadline).getTime();
-    const now = Date.now();
-
-    if (now >= endTime) {
-      if (Math.abs(currentRate - parseFloat(t.target)) > 0.001) {
-        await pool.query('UPDATE rate SET to_rub=$1, updated_at=NOW(), updated_by=$2 WHERE id=1', [t.target, 'auto']);
-        await pool.query('INSERT INTO rate_history (rate) VALUES ($1)', [t.target]);
-      }
-      await pool.query('DELETE FROM rate_target WHERE id=1');
-      return;
-    }
-
-    const total = endTime - startTime;
-    const elapsed = now - startTime;
-    const progress = Math.min(1, Math.max(0, elapsed / total));
-    const expectedRate = parseFloat(t.start_rate) + (parseFloat(t.target) - parseFloat(t.start_rate)) * progress;
-    const rounded = Math.round(expectedRate * 100) / 100;
-
-    if (Math.abs(rounded - currentRate) > 0.01) {
-      await pool.query('UPDATE rate SET to_rub=$1, updated_at=NOW(), updated_by=$2 WHERE id=1', [rounded, 'auto']);
-      await pool.query('INSERT INTO rate_history (rate) VALUES ($1)', [rounded]);
-    }
-  } catch (err) { console.error('tickRate:', err.message); }
-};
-
 setInterval(tickRate, 30 * 1000);
 setTimeout(tickRate, 5000);
 
