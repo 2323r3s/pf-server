@@ -370,34 +370,66 @@ app.post('/api/casino/spin', async (req, res) => {
     const allSame = reels[0] === reels[1] && reels[1] === reels[2];
     const twoSame = !allSame && (reels[0] === reels[1] || reels[1] === reels[2] || reels[0] === reels[2]);
 
-    let winAmount = 0;
-    let prizeType = '';
+    // Подсчёты
+    const appleCount = reels.filter(r => r === '🍎').length;
+    const grapeCount = reels.filter(r => r === '🍇').length;
+    const plumCount = reels.filter(r => r === '🍑').length;
 
-    if (allSame && reels[0] === '🍌') {
-      // 3 банана = ×16
+    let winAmount = 0;
+    let prizeType = 'lose';
+
+    // ═══ 3 БАНАНА ═══
+    if (bananaCount === 3) {
       winAmount = Math.floor(bet * 16);
       prizeType = 'jackpot_banana';
-    } else if (bananaCount === 2) {
-      // 2 банана = ×8
+    }
+    // ═══ 2 БАНАНА ═══
+    else if (bananaCount === 2) {
       winAmount = Math.floor(bet * 8);
       prizeType = 'double_banana';
-    } else if (bananaCount === 1) {
-      // 1 банан = ×4
+    }
+    // ═══ 1 БАНАН ═══
+    else if (bananaCount === 1) {
       winAmount = Math.floor(bet * 4);
       prizeType = 'banana';
-    } else if (allSame && reels[0] === '🍑') {
-      winAmount = Math.floor(bet * 8);
-      prizeType = 'triple_plum';
-    } else if (allSame && reels[0] === '🍇') {
-      winAmount = Math.floor(bet * 4);
-      prizeType = 'triple_grape';
-    } else if (allSame && reels[0] === '🍎') {
+    }
+    // ═══ БЕЗ БАНАНОВ — 3 одинаковых ═══
+    else if (appleCount === 3) {
       winAmount = Math.floor(bet * 2);
       prizeType = 'triple_apple';
-    } else if (twoSame) {
+    }
+    else if (grapeCount === 3) {
+      winAmount = Math.floor(bet * 4);
+      prizeType = 'triple_grape';
+    }
+    else if (plumCount === 3) {
+      winAmount = Math.floor(bet * 8);
+      prizeType = 'triple_plum';
+    }
+    // ═══ БЕЗ БАНАНОВ — ровно 2 одинаковых ═══
+    else if (grapeCount === 2) {
+      winAmount = Math.floor(bet * 3);
+      prizeType = 'double_grape';
+    }
+    else if (plumCount === 2) {
       winAmount = Math.floor(bet * 2);
-      prizeType = 'double';
-    } else {
+      prizeType = 'double_plum';
+    }
+    else if (appleCount === 2) {
+      winAmount = Math.floor(bet * 1.5);
+      prizeType = 'double_apple';
+    }
+    // ═══ БЕЗ БАНАНОВ — 1 виноград/слива ═══
+    else if (grapeCount === 1) {
+      winAmount = Math.floor(bet * 1.6);
+      prizeType = 'one_grape';
+    }
+    else if (plumCount === 1) {
+      winAmount = Math.floor(bet * 1.2);
+      prizeType = 'one_plum';
+    }
+    // ═══ Всё разное (только яблоки) или просто яблоко ═══
+    else {
       winAmount = 0;
       prizeType = 'lose';
     }
