@@ -42,12 +42,20 @@ const initDB = async () => {
         login_changed_at TIMESTAMP,
         has_pension BOOLEAN DEFAULT false,
         has_insurance BOOLEAN DEFAULT false,
-        insurance_until TIMESTAMP
+        insurance_until TIMESTAMP,
+        is_banned BOOLEAN DEFAULT false,
+        ban_reason TEXT,
+        ban_type TEXT,
+        stamp_until TIMESTAMP
       )
     `);
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS has_pension BOOLEAN DEFAULT false`);
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS has_insurance BOOLEAN DEFAULT false`);
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS insurance_until TIMESTAMP`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_banned BOOLEAN DEFAULT false`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS ban_reason TEXT`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS ban_type TEXT`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS stamp_until TIMESTAMP`);
 
     // news
     await pool.query(`
@@ -330,15 +338,17 @@ app.post('/api/users', async (req, res) => {
   try {
     const u = req.body;
     await pool.query(
-      `INSERT INTO users (phone, login, password, first_name, last_name, code, paradox, tripcode, status, aura, tonki, avatar, has_pension, has_insurance, insurance_until)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+      `INSERT INTO users (phone, login, password, first_name, last_name, code, paradox, tripcode, status, aura, tonki, avatar, has_pension, has_insurance, insurance_until, is_banned, ban_reason, ban_type, stamp_until)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
        ON CONFLICT (phone) DO UPDATE SET
          login=$2, password=$3, first_name=$4, last_name=$5, code=$6,
          paradox=$7, tripcode=$8, status=$9, aura=$10, tonki=$11, avatar=$12,
-         has_pension=$13, has_insurance=$14, insurance_until=$15`,
+         has_pension=$13, has_insurance=$14, insurance_until=$15,
+         is_banned=$16, ban_reason=$17, ban_type=$18, stamp_until=$19`,
       [u.phone, u.login, u.password, u.firstName, u.lastName, u.code, u.paradox,
        u.tripcode, u.status, u.aura, u.tonki, u.avatar,
-       u.hasPension || false, u.hasInsurance || false, u.insuranceUntil || null]
+       u.hasPension || false, u.hasInsurance || false, u.insuranceUntil || null,
+       u.isBanned || false, u.banReason || null, u.banType || null, u.stampUntil || null]
     );
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -348,6 +358,85 @@ app.delete('/api/users/:phone', async (req, res) => {
   try {
     await pool.query('DELETE FROM users WHERE phone=$1', [req.params.phone]);
     res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ═══════════════════════════════════════════════════════
+// ВЫСЕЛЕНИЕ / ШТАММ / ПРОЩЕНИЕ
+// ═══════════════════════════════════════════════════════
+app.post('/api/admin/ban', async (req, res) => {
+  try {
+    const { phone, reason } = req.body;
+    if (!phone || !reason) return res.status(400).json({ error: 'Bad params' });
+    await pool.query(
+      `UPDATE users SET is_banned=true, ban_reason=$1, ban_type='permanent', stamp_until=NULL WHERE phone=$2`,
+      [reason, phone]
+    );
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/admin/forgive_ban', async (req, res) => {
+  try {
+    const { phone, reason } = req.body;
+    if (!phone || !reason) return res.status(400).json({ error: 'Bad params' });
+    await pool.query(
+      `UPDATE users SET is_banned=true, ban_reason=$1, ban_type='forgiving', stamp_until=NULL WHERE phone=$2`,
+      [reason, phone]
+    );
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/admin/stamp', async (req, res) => {
+  try {
+    const { phone, reason, until } = req.body;
+    if (!phone || !reason || !until) return res.status(400).json({ error: 'Bad params' });
+    await pool.query(
+      `UPDATE users SET is_banned=false, ban_reason=$1, ban_type='stamp', stamp_until=$2 WHERE phone=$3`,
+      [reason, until, phone]
+    );
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/admin/unstamp', async (req, res) => {
+  try {
+    const { phone } = req.body;
+    await pool.query(
+      `UPDATE users SET ban_reason=NULL, ban_type=NULL, stamp_until=NULL WHERE phone=$1`,
+      [phone]
+    );
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/admin/pardon', async (req, res) => {
+  try {
+    const { phone } = req.body;
+    await pool.query(
+      `UPDATE users SET is_banned=false, ban_reason=NULL, ban_type=NULL, stamp_until=NULL WHERE phone=$1`,
+      [phone]
+    );
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/admin/check_stamp/:phone', async (req, res) => {
+  try {
+    const r = await pool.query('SELECT * FROM users WHERE phone=$1', [req.params.phone]);
+    if (r.rows.length === 0) return res.json({ active: false });
+    const u = r.rows[0];
+    if (u.ban_type !== 'stamp' || !u.stamp_until) return res.json({ active: false });
+    const until = new Date(u.stamp_until).getTime();
+    if (Date.now() >= until) {
+      await pool.query(
+        `UPDATE users SET ban_reason=NULL, ban_type=NULL, stamp_until=NULL WHERE phone=$1`,
+        [req.params.phone]
+      );
+      return res.json({ active: false });
+    }
+    res.json({ active: true, until: u.stamp_until, reason: u.ban_reason });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -394,14 +483,11 @@ app.post('/api/credit_requests/:id/resolve', async (req, res) => {
     );
 
     if (status === 'approved') {
-      // Выдаём деньги ЖИ
       const userRes = await pool.query('SELECT * FROM users WHERE phone=$1', [request.user_phone]);
       if (userRes.rows.length > 0) {
         const u = userRes.rows[0];
         await pool.query('UPDATE users SET tonki=$1 WHERE phone=$2', [(u.tonki || 0) + request.amount, request.user_phone]);
       }
-
-      // Создаём кредит с 10%
       const totalDue = Math.floor(request.amount * 1.1);
       const dueDate = new Date(Date.now() + request.months * 30 * 24 * 60 * 60 * 1000);
       await pool.query(
@@ -470,7 +556,6 @@ app.post('/api/credits/:id/pay', async (req, res) => {
       [newPaid, newStatus, newStatus === 'paid' ? new Date().toISOString() : null, credit.id]
     );
 
-    // ПР получает
     const prRes = await pool.query('SELECT * FROM users WHERE status=$1 LIMIT 1', ['ПР']);
     if (prRes.rows.length > 0) {
       const pr = prRes.rows[0];
