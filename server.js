@@ -25,7 +25,7 @@ pool.query('SELECT NOW()')
 // ═══════════════════════════════════════════════════════
 const initDB = async () => {
   try {
-    // ── users ──
+    // users
     await pool.query(`
       CREATE TABLE IF NOT EXISTS users (
         phone TEXT PRIMARY KEY,
@@ -45,12 +45,11 @@ const initDB = async () => {
         insurance_until TIMESTAMP
       )
     `);
-
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS has_pension BOOLEAN DEFAULT false`);
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS has_insurance BOOLEAN DEFAULT false`);
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS insurance_until TIMESTAMP`);
 
-    // ── news ──
+    // news
     await pool.query(`
       CREATE TABLE IF NOT EXISTS news (
         id BIGINT PRIMARY KEY,
@@ -60,7 +59,7 @@ const initDB = async () => {
       )
     `);
 
-    // ── bank ──
+    // bank
     await pool.query(`
       CREATE TABLE IF NOT EXISTS bank (
         phone TEXT PRIMARY KEY,
@@ -70,7 +69,7 @@ const initDB = async () => {
     await pool.query(`ALTER TABLE bank ADD COLUMN IF NOT EXISTS last_interest_at TIMESTAMP`);
     await pool.query(`ALTER TABLE bank ADD COLUMN IF NOT EXISTS total_interest INTEGER DEFAULT 0`);
 
-    // ── interest_history ──
+    // interest_history
     await pool.query(`
       CREATE TABLE IF NOT EXISTS interest_history (
         id BIGINT PRIMARY KEY,
@@ -81,7 +80,7 @@ const initDB = async () => {
       )
     `);
 
-    // ── fines ──
+    // fines
     await pool.query(`
       CREATE TABLE IF NOT EXISTS fines (
         id BIGINT PRIMARY KEY, phone TEXT NOT NULL, reason TEXT NOT NULL, amount INTEGER NOT NULL,
@@ -89,7 +88,7 @@ const initDB = async () => {
       )
     `);
 
-    // ── friends ──
+    // friends
     await pool.query(`
       CREATE TABLE IF NOT EXISTS friends (
         user_phone TEXT NOT NULL, friend_phone TEXT NOT NULL, type TEXT NOT NULL,
@@ -97,7 +96,7 @@ const initDB = async () => {
       )
     `);
 
-    // ── messages ──
+    // messages
     await pool.query(`
       CREATE TABLE IF NOT EXISTS messages (
         id BIGINT PRIMARY KEY, from_phone TEXT NOT NULL, from_name TEXT NOT NULL,
@@ -105,7 +104,7 @@ const initDB = async () => {
       )
     `);
 
-    // ── private_messages ──
+    // private_messages
     await pool.query(`
       CREATE TABLE IF NOT EXISTS private_messages (
         id BIGINT PRIMARY KEY, chat_id TEXT NOT NULL, from_phone TEXT NOT NULL,
@@ -113,10 +112,10 @@ const initDB = async () => {
       )
     `);
 
-    // ── docs ──
+    // docs
     await pool.query(`CREATE TABLE IF NOT EXISTS docs (key TEXT PRIMARY KEY, content TEXT NOT NULL)`);
 
-    // ── rate ──
+    // rate
     await pool.query(`
       CREATE TABLE IF NOT EXISTS rate (
         id INTEGER PRIMARY KEY DEFAULT 1,
@@ -126,7 +125,7 @@ const initDB = async () => {
     `);
     await pool.query(`INSERT INTO rate (id, to_rub) VALUES (1, 10) ON CONFLICT (id) DO NOTHING`);
 
-    // ── rate_history ──
+    // rate_history
     await pool.query(`
       CREATE TABLE IF NOT EXISTS rate_history (
         id SERIAL PRIMARY KEY,
@@ -135,7 +134,7 @@ const initDB = async () => {
       )
     `);
 
-    // ── rate_target ──
+    // rate_target
     await pool.query(`
       CREATE TABLE IF NOT EXISTS rate_target (
         id INTEGER PRIMARY KEY DEFAULT 1,
@@ -144,7 +143,7 @@ const initDB = async () => {
       )
     `);
 
-    // ── bank_pf ──
+    // bank_pf
     await pool.query(`
       CREATE TABLE IF NOT EXISTS bank_pf (
         id INTEGER PRIMARY KEY DEFAULT 1, amount BIGINT NOT NULL DEFAULT 3124000000000
@@ -152,7 +151,7 @@ const initDB = async () => {
     `);
     await pool.query(`INSERT INTO bank_pf (id, amount) VALUES (1, 3124000000000) ON CONFLICT (id) DO NOTHING`);
 
-    // ── appeals ──
+    // appeals
     await pool.query(`
       CREATE TABLE IF NOT EXISTS appeals (
         id BIGINT PRIMARY KEY,
@@ -168,7 +167,7 @@ const initDB = async () => {
       )
     `);
 
-    // ── doc_requests ──
+    // doc_requests
     await pool.query(`
       CREATE TABLE IF NOT EXISTS doc_requests (
         id BIGINT PRIMARY KEY,
@@ -183,7 +182,7 @@ const initDB = async () => {
       )
     `);
 
-    // ── aura_history ──
+    // aura_history
     await pool.query(`
       CREATE TABLE IF NOT EXISTS aura_history (
         id BIGINT PRIMARY KEY,
@@ -194,7 +193,7 @@ const initDB = async () => {
       )
     `);
 
-    // ── salary_paid ──
+    // salary_paid
     await pool.query(`
       CREATE TABLE IF NOT EXISTS salary_paid (
         phone TEXT PRIMARY KEY,
@@ -202,7 +201,7 @@ const initDB = async () => {
       )
     `);
 
-    // ── elections ──
+    // elections
     await pool.query(`
       CREATE TABLE IF NOT EXISTS elections (
         id INTEGER PRIMARY KEY DEFAULT 1,
@@ -214,7 +213,7 @@ const initDB = async () => {
       )
     `);
 
-    // ── election_candidates ──
+    // election_candidates
     await pool.query(`
       CREATE TABLE IF NOT EXISTS election_candidates (
         election_id INTEGER NOT NULL,
@@ -226,7 +225,7 @@ const initDB = async () => {
       )
     `);
 
-    // ── election_votes ──
+    // election_votes
     await pool.query(`
       CREATE TABLE IF NOT EXISTS election_votes (
         election_id INTEGER NOT NULL,
@@ -237,7 +236,7 @@ const initDB = async () => {
       )
     `);
 
-    // ── casino_history ──
+    // casino_history
     await pool.query(`
       CREATE TABLE IF NOT EXISTS casino_history (
         id BIGINT PRIMARY KEY,
@@ -250,7 +249,7 @@ const initDB = async () => {
       )
     `);
 
-    // ── casino_daily ──
+    // casino_daily
     await pool.query(`
       CREATE TABLE IF NOT EXISTS casino_daily (
         phone TEXT PRIMARY KEY,
@@ -259,12 +258,46 @@ const initDB = async () => {
       )
     `);
 
-    // ── casino_permission ──
+    // casino_permission
     await pool.query(`
       CREATE TABLE IF NOT EXISTS casino_permission (
         phone TEXT PRIMARY KEY,
         granted_at TEXT NOT NULL,
         granted_by TEXT
+      )
+    `);
+
+    // credit_requests
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS credit_requests (
+        id BIGINT PRIMARY KEY,
+        user_phone TEXT NOT NULL,
+        user_name TEXT NOT NULL,
+        amount INTEGER NOT NULL,
+        reason TEXT NOT NULL,
+        months INTEGER NOT NULL,
+        status TEXT DEFAULT 'pending',
+        pr_comment TEXT,
+        created_at TEXT NOT NULL,
+        resolved_at TEXT,
+        resolved_by TEXT
+      )
+    `);
+
+    // credits
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS credits (
+        id BIGINT PRIMARY KEY,
+        user_phone TEXT NOT NULL,
+        amount INTEGER NOT NULL,
+        total_due INTEGER NOT NULL,
+        paid INTEGER DEFAULT 0,
+        reason TEXT NOT NULL,
+        months INTEGER NOT NULL,
+        due_date TIMESTAMP NOT NULL,
+        status TEXT DEFAULT 'active',
+        created_at TIMESTAMP DEFAULT NOW(),
+        paid_at TIMESTAMP
       )
     `);
 
@@ -319,6 +352,136 @@ app.delete('/api/users/:phone', async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════
+// КРЕДИТЫ
+// ═══════════════════════════════════════════════════════
+app.get('/api/credit_requests', async (req, res) => {
+  try {
+    const r = await pool.query('SELECT * FROM credit_requests ORDER BY id DESC');
+    res.json(r.rows.map(x => ({
+      id: x.id, userPhone: x.user_phone, userName: x.user_name,
+      amount: x.amount, reason: x.reason, months: x.months,
+      status: x.status, prComment: x.pr_comment,
+      createdAt: x.created_at, resolvedAt: x.resolved_at, resolvedBy: x.resolved_by,
+    })));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/credit_requests', async (req, res) => {
+  try {
+    const a = req.body;
+    await pool.query(
+      `INSERT INTO credit_requests (id, user_phone, user_name, amount, reason, months, status, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+       ON CONFLICT (id) DO UPDATE SET status=$7, pr_comment=$9, resolved_at=$10, resolved_by=$11`,
+      [a.id, a.userPhone, a.userName, a.amount, a.reason, a.months,
+       a.status || 'pending', a.createdAt,
+       a.prComment || null, a.resolvedAt || null, a.resolvedBy || null]
+    );
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/credit_requests/:id/resolve', async (req, res) => {
+  try {
+    const { status, prComment, resolvedBy } = req.body;
+    const reqRes = await pool.query('SELECT * FROM credit_requests WHERE id=$1', [req.params.id]);
+    if (reqRes.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    const request = reqRes.rows[0];
+
+    await pool.query(
+      `UPDATE credit_requests SET status=$1, pr_comment=$2, resolved_at=$3, resolved_by=$4 WHERE id=$5`,
+      [status, prComment || null, new Date().toISOString(), resolvedBy || null, req.params.id]
+    );
+
+    if (status === 'approved') {
+      // Выдаём деньги ЖИ
+      const userRes = await pool.query('SELECT * FROM users WHERE phone=$1', [request.user_phone]);
+      if (userRes.rows.length > 0) {
+        const u = userRes.rows[0];
+        await pool.query('UPDATE users SET tonki=$1 WHERE phone=$2', [(u.tonki || 0) + request.amount, request.user_phone]);
+      }
+
+      // Создаём кредит с 10%
+      const totalDue = Math.floor(request.amount * 1.1);
+      const dueDate = new Date(Date.now() + request.months * 30 * 24 * 60 * 60 * 1000);
+      await pool.query(
+        `INSERT INTO credits (id, user_phone, amount, total_due, reason, months, due_date, status, created_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,'active',NOW())`,
+        [Date.now(), request.user_phone, request.amount, totalDue, request.reason, request.months, dueDate.toISOString()]
+      );
+    }
+
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/credits/:phone', async (req, res) => {
+  try {
+    const r = await pool.query('SELECT * FROM credits WHERE user_phone=$1 ORDER BY id DESC', [req.params.phone]);
+    res.json(r.rows.map(c => ({
+      id: c.id, userPhone: c.user_phone, amount: c.amount,
+      totalDue: c.total_due, paid: c.paid,
+      reason: c.reason, months: c.months,
+      dueDate: c.due_date, status: c.status,
+      createdAt: c.created_at, paidAt: c.paid_at,
+    })));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/credits', async (req, res) => {
+  try {
+    const r = await pool.query('SELECT * FROM credits ORDER BY id DESC');
+    res.json(r.rows.map(c => ({
+      id: c.id, userPhone: c.user_phone, amount: c.amount,
+      totalDue: c.total_due, paid: c.paid,
+      reason: c.reason, months: c.months,
+      dueDate: c.due_date, status: c.status,
+      createdAt: c.created_at, paidAt: c.paid_at,
+    })));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/credits/:id/pay', async (req, res) => {
+  try {
+    const { phone, amount } = req.body;
+    if (!phone || !amount || amount <= 0) return res.status(400).json({ error: 'Bad amount' });
+
+    const creditRes = await pool.query('SELECT * FROM credits WHERE id=$1', [req.params.id]);
+    if (creditRes.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    const credit = creditRes.rows[0];
+
+    if (credit.status !== 'active') return res.status(400).json({ error: 'Кредит уже закрыт' });
+    if (credit.user_phone !== phone) return res.status(403).json({ error: 'Не твой кредит' });
+
+    const userRes = await pool.query('SELECT * FROM users WHERE phone=$1', [phone]);
+    if (userRes.rows.length === 0) return res.status(404).json({ error: 'User not found' });
+    const user = userRes.rows[0];
+
+    if (user.tonki < amount) return res.status(400).json({ error: 'Недостаточно тонков' });
+
+    const remaining = credit.total_due - (credit.paid || 0);
+    const payAmount = Math.min(amount, remaining);
+    const newPaid = (credit.paid || 0) + payAmount;
+    const newStatus = newPaid >= credit.total_due ? 'paid' : 'active';
+
+    await pool.query('UPDATE users SET tonki=$1 WHERE phone=$2', [user.tonki - payAmount, phone]);
+    await pool.query(
+      `UPDATE credits SET paid=$1, status=$2, paid_at=$3 WHERE id=$4`,
+      [newPaid, newStatus, newStatus === 'paid' ? new Date().toISOString() : null, credit.id]
+    );
+
+    // ПР получает
+    const prRes = await pool.query('SELECT * FROM users WHERE status=$1 LIMIT 1', ['ПР']);
+    if (prRes.rows.length > 0) {
+      const pr = prRes.rows[0];
+      await pool.query('UPDATE users SET tonki=$1 WHERE phone=$2', [(pr.tonki || 0) + payAmount, pr.phone]);
+    }
+
+    res.json({ ok: true, paid: newPaid, remaining: credit.total_due - newPaid, closed: newStatus === 'paid' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ═══════════════════════════════════════════════════════
 // КАЗИНО
 // ═══════════════════════════════════════════════════════
 app.post('/api/casino/spin', async (req, res) => {
@@ -328,21 +491,17 @@ app.post('/api/casino/spin', async (req, res) => {
       return res.status(400).json({ error: 'Ставка 20-1000' });
     }
 
-    // Проверяем юзера
     const userRes = await pool.query('SELECT * FROM users WHERE phone=$1', [phone]);
     if (userRes.rows.length === 0) return res.status(404).json({ error: 'Not found' });
     const user = userRes.rows[0];
     const isPR = user.status === 'ПР';
 
-    // ⚡ ПР — без разрешения и без лимита
     if (!isPR) {
-      // 1. Разрешение
       const permRes = await pool.query('SELECT * FROM casino_permission WHERE phone=$1', [phone]);
       if (permRes.rows.length === 0) {
         return res.status(403).json({ error: 'Нужно Разрешение на казик от ПР' });
       }
 
-      // 2. Лимит 10/день
       const today = new Date().toISOString().slice(0, 10);
       const dailyRes = await pool.query('SELECT * FROM casino_daily WHERE phone=$1', [phone]);
       if (dailyRes.rows.length > 0) {
@@ -353,12 +512,10 @@ app.post('/api/casino/spin', async (req, res) => {
       }
     }
 
-    // Баланс
     if (user.tonki < bet) {
       return res.status(400).json({ error: 'Недостаточно тонков', need: bet - user.tonki });
     }
 
-    // Барабаны
     const symbols = ['🍎', '🍇', '🍑', '🍌'];
     const weights = [34, 33, 30, 3];
     const pickWeighted = () => {
@@ -398,7 +555,6 @@ app.post('/api/casino/spin', async (req, res) => {
 
     await pool.query('UPDATE users SET tonki=$1 WHERE phone=$2', [newTonki, phone]);
 
-    // ⚡ Счётчик дня только для НЕ-ПР
     let gamesLeft = null;
     if (!isPR) {
       const today = new Date().toISOString().slice(0, 10);
@@ -1033,6 +1189,44 @@ app.post('/api/doc_requests/:id/resolve', async (req, res) => {
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
+
+// ═══════════════════════════════════════════════════════
+// АВТО-КУРС
+// ═══════════════════════════════════════════════════════
+const tickRate = async () => {
+  try {
+    const targetRes = await pool.query('SELECT * FROM rate_target WHERE id=1');
+    if (targetRes.rows.length === 0) return;
+    const t = targetRes.rows[0];
+    if (!t.target || !t.deadline) return;
+
+    const rateRes = await pool.query('SELECT to_rub FROM rate WHERE id=1');
+    const currentRate = parseFloat(rateRes.rows[0]?.to_rub || 10);
+    const startTime = new Date(t.started_at).getTime();
+    const endTime = new Date(t.deadline).getTime();
+    const now = Date.now();
+
+    if (now >= endTime) {
+      if (Math.abs(currentRate - parseFloat(t.target)) > 0.001) {
+        await pool.query('UPDATE rate SET to_rub=$1, updated_at=NOW(), updated_by=$2 WHERE id=1', [t.target, 'auto']);
+        await pool.query('INSERT INTO rate_history (rate) VALUES ($1)', [t.target]);
+      }
+      await pool.query('DELETE FROM rate_target WHERE id=1');
+      return;
+    }
+
+    const total = endTime - startTime;
+    const elapsed = now - startTime;
+    const progress = Math.min(1, Math.max(0, elapsed / total));
+    const expectedRate = parseFloat(t.start_rate) + (parseFloat(t.target) - parseFloat(t.start_rate)) * progress;
+    const rounded = Math.round(expectedRate * 100) / 100;
+
+    if (Math.abs(rounded - currentRate) > 0.01) {
+      await pool.query('UPDATE rate SET to_rub=$1, updated_at=NOW(), updated_by=$2 WHERE id=1', [rounded, 'auto']);
+      await pool.query('INSERT INTO rate_history (rate) VALUES ($1)', [rounded]);
+    }
+  } catch (err) { console.error('tickRate:', err.message); }
+};
 
 setInterval(tickRate, 30 * 1000);
 setTimeout(tickRate, 5000);
