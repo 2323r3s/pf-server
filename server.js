@@ -238,12 +238,23 @@ const initDB = async () => {
 
 initDB();
 
-    // Голосовые сообщения — тип
-    await pool.query(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS type TEXT DEFAULT 'text'`);
-    await pool.query(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS audio TEXT`);
+    // Лимит игр в казино — по дням
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS casino_daily (
+        phone TEXT PRIMARY KEY,
+        last_date TEXT NOT NULL,
+        count INTEGER DEFAULT 0
+      )
+    `);
 
-    await pool.query(`ALTER TABLE private_messages ADD COLUMN IF NOT EXISTS type TEXT DEFAULT 'text'`);
-    await pool.query(`ALTER TABLE private_messages ADD COLUMN IF NOT EXISTS audio TEXT`);
+    // Разрешение на казино
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS casino_permission (
+        phone TEXT PRIMARY KEY,
+        granted_at TEXT NOT NULL,
+        granted_by TEXT
+      )
+    `);
 
 // ═══════════════════════════════════════════════════════
 // ГЛАВНАЯ
@@ -293,10 +304,31 @@ app.delete('/api/users/:phone', async (req, res) => {
 app.post('/api/casino/spin', async (req, res) => {
   try {
     const { phone, name, bet } = req.body;
-    if (!phone || !bet || bet < 5 || bet > 1000) {
-      return res.status(400).json({ error: 'Ставка 5-1000' });
+    if (!phone || !bet || bet < 20 || bet > 1000) {
+      return res.status(400).json({ error: 'Ставка 20-1000' });
     }
 
+    // ⚡ 1. Проверяем РАЗРЕШЕНИЕ на казик
+    const permRes = await pool.query('SELECT * FROM casino_permission WHERE phone=$1', [phone]);
+    if (permRes.rows.length === 0) {
+      return res.status(403).json({ error: 'Нужно Разрешение на казик от ПР' });
+    }
+
+    // ⚡ 2. Проверяем ЛИМИТ 10 игр в день
+    const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+    const dailyRes = await pool.query('SELECT * FROM casino_daily WHERE phone=$1', [phone]);
+    let dailyCount = 0;
+    if (dailyRes.rows.length > 0) {
+      const d = dailyRes.rows[0];
+      if (d.last_date === today) {
+        dailyCount = d.count;
+        if (dailyCount >= 10) {
+          return res.status(403).json({ error: 'Лимит 10 игр в день исчерпан' });
+        }
+      }
+    }
+
+    // ⚡ 3. Проверяем баланс
     const userRes = await pool.query('SELECT * FROM users WHERE phone=$1', [phone]);
     if (userRes.rows.length === 0) return res.status(404).json({ error: 'Not found' });
     const user = userRes.rows[0];
@@ -304,7 +336,8 @@ app.post('/api/casino/spin', async (req, res) => {
       return res.status(400).json({ error: 'Недостаточно тонков', need: bet - user.tonki });
     }
 
-    const symbols = ['🍎', '🍒', '🍑', '🍌'];
+    // ⚡ 4. Крутим барабаны
+    const symbols = ['🍎', '🍇', '🍑', '🍌'];
     const weights = [34, 33, 30, 3];
 
     const pickWeighted = () => {
@@ -327,17 +360,23 @@ app.post('/api/casino/spin', async (req, res) => {
     let prizeType = '';
 
     if (allSame && reels[0] === '🍌') {
-      winAmount = 500;
+      winAmount = Math.floor(bet * 16);
       prizeType = 'jackpot_banana';
+    } else if (allSame && reels[0] === '🍑') {
+      winAmount = Math.floor(bet * 8);
+      prizeType = 'triple_plum';
+    } else if (allSame && reels[0] === '🍇') {
+      winAmount = Math.floor(bet * 4);
+      prizeType = 'triple_grape';
+    } else if (allSame && reels[0] === '🍎') {
+      winAmount = Math.floor(bet * 2);
+      prizeType = 'triple_apple';
     } else if (bananaCount === 2) {
       winAmount = 150;
       prizeType = 'double_banana';
     } else if (bananaCount === 1) {
       winAmount = 50;
       prizeType = 'banana';
-    } else if (allSame) {
-      winAmount = Math.floor(bet * 3);
-      prizeType = 'triple';
     } else if (twoSame) {
       winAmount = Math.floor(bet * 2);
       prizeType = 'double';
@@ -348,8 +387,18 @@ app.post('/api/casino/spin', async (req, res) => {
 
     const newTonki = user.tonki - bet + winAmount;
 
+    // ⚡ 5. Обновляем баланс
     await pool.query('UPDATE users SET tonki=$1 WHERE phone=$2', [newTonki, phone]);
 
+    // ⚡ 6. Обновляем счётчик дня
+    const newCount = (dailyRes.rows[0]?.last_date === today ? dailyCount : 0) + 1;
+    await pool.query(
+      `INSERT INTO casino_daily (phone, last_date, count) VALUES ($1, $2, $3)
+       ON CONFLICT (phone) DO UPDATE SET last_date=$2, count=$3`,
+      [phone, today, newCount]
+    );
+
+    // ⚡ 7. Пишем в историю
     await pool.query(
       `INSERT INTO casino_history (id, phone, name, bet, win, reels, date)
        VALUES ($1,$2,$3,$4,$5,$6,$7)`,
@@ -357,14 +406,10 @@ app.post('/api/casino/spin', async (req, res) => {
     );
 
     res.json({
-      ok: true,
-      reels,
-      bet,
-      winAmount,
-      netWin: winAmount - bet,
-      prizeType,
-      newTonki,
-      oldTonki: user.tonki,
+      ok: true, reels, bet, winAmount,
+      netWin: winAmount - bet, prizeType,
+      newTonki, oldTonki: user.tonki,
+      gamesToday: newCount, gamesLeft: 10 - newCount,
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -373,6 +418,52 @@ app.get('/api/casino/history/:phone', async (req, res) => {
   try {
     const r = await pool.query('SELECT * FROM casino_history WHERE phone=$1 ORDER BY id DESC LIMIT 20', [req.params.phone]);
     res.json(r.rows.map(h => ({ id: h.id, bet: h.bet, win: h.win, reels: h.reels, date: h.date })));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Сколько игр сегодня + есть ли разрешение
+app.get('/api/casino/daily/:phone', async (req, res) => {
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    const daily = await pool.query('SELECT * FROM casino_daily WHERE phone=$1', [req.params.phone]);
+    const perm = await pool.query('SELECT * FROM casino_permission WHERE phone=$1', [req.params.phone]);
+
+    const count = (daily.rows[0]?.last_date === today) ? daily.rows[0].count : 0;
+    res.json({
+      count,
+      left: Math.max(0, 10 - count),
+      hasPermission: perm.rows.length > 0,
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ПР выдаёт разрешение
+app.post('/api/casino/permission', async (req, res) => {
+  try {
+    const { phone, grantedBy } = req.body;
+    await pool.query(
+      `INSERT INTO casino_permission (phone, granted_at, granted_by)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (phone) DO UPDATE SET granted_at=$2, granted_by=$3`,
+      [phone, new Date().toISOString(), grantedBy || 'ПР']
+    );
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Отозвать разрешение
+app.delete('/api/casino/permission/:phone', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM casino_permission WHERE phone=$1', [req.params.phone]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Список всех разрешений (для ПР)
+app.get('/api/casino/permissions', async (req, res) => {
+  try {
+    const r = await pool.query('SELECT * FROM casino_permission');
+    res.json(r.rows.map(x => ({ phone: x.phone, grantedAt: x.granted_at, grantedBy: x.granted_by })));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
