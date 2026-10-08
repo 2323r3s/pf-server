@@ -373,14 +373,34 @@ app.post('/api/casino/spin', async (req, res) => {
     let winAmount = 0;
     let prizeType = '';
 
-    if (allSame && reels[0] === '🍌') { winAmount = Math.floor(bet * 16); prizeType = 'jackpot_banana'; }
-    else if (allSame && reels[0] === '🍑') { winAmount = Math.floor(bet * 8); prizeType = 'triple_plum'; }
-    else if (allSame && reels[0] === '🍇') { winAmount = Math.floor(bet * 4); prizeType = 'triple_grape'; }
-    else if (allSame && reels[0] === '🍎') { winAmount = Math.floor(bet * 2); prizeType = 'triple_apple'; }
-    else if (bananaCount === 2) { winAmount = 150; prizeType = 'double_banana'; }
-    else if (bananaCount === 1) { winAmount = 50; prizeType = 'banana'; }
-    else if (twoSame) { winAmount = Math.floor(bet * 2); prizeType = 'double'; }
-    else { winAmount = 0; prizeType = 'lose'; }
+    if (allSame && reels[0] === '🍌') {
+      // 3 банана = ×16
+      winAmount = Math.floor(bet * 16);
+      prizeType = 'jackpot_banana';
+    } else if (bananaCount === 2) {
+      // 2 банана = ×8
+      winAmount = Math.floor(bet * 8);
+      prizeType = 'double_banana';
+    } else if (bananaCount === 1) {
+      // 1 банан = ×4
+      winAmount = Math.floor(bet * 4);
+      prizeType = 'banana';
+    } else if (allSame && reels[0] === '🍑') {
+      winAmount = Math.floor(bet * 8);
+      prizeType = 'triple_plum';
+    } else if (allSame && reels[0] === '🍇') {
+      winAmount = Math.floor(bet * 4);
+      prizeType = 'triple_grape';
+    } else if (allSame && reels[0] === '🍎') {
+      winAmount = Math.floor(bet * 2);
+      prizeType = 'triple_apple';
+    } else if (twoSame) {
+      winAmount = Math.floor(bet * 2);
+      prizeType = 'double';
+    } else {
+      winAmount = 0;
+      prizeType = 'lose';
+    }
 
     const newTonki = user.tonki - bet + winAmount;
 
