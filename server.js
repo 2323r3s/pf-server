@@ -328,31 +328,37 @@ app.post('/api/casino/spin', async (req, res) => {
       return res.status(400).json({ error: 'Ставка 20-1000' });
     }
 
-    // 1. Разрешение
-    const permRes = await pool.query('SELECT * FROM casino_permission WHERE phone=$1', [phone]);
-    if (permRes.rows.length === 0) {
-      return res.status(403).json({ error: 'Нужно Разрешение на казик от ПР' });
-    }
-
-    // 2. Лимит 10/день
-    const today = new Date().toISOString().slice(0, 10);
-    const dailyRes = await pool.query('SELECT * FROM casino_daily WHERE phone=$1', [phone]);
-    let dailyCount = 0;
-    if (dailyRes.rows.length > 0) {
-      const d = dailyRes.rows[0];
-      if (d.last_date === today) {
-        dailyCount = d.count;
-        if (dailyCount >= 10) return res.status(403).json({ error: 'Лимит 10 игр в день исчерпан' });
-      }
-    }
-
-    // 3. Баланс
+    // Проверяем юзера
     const userRes = await pool.query('SELECT * FROM users WHERE phone=$1', [phone]);
     if (userRes.rows.length === 0) return res.status(404).json({ error: 'Not found' });
     const user = userRes.rows[0];
-    if (user.tonki < bet) return res.status(400).json({ error: 'Недостаточно тонков', need: bet - user.tonki });
+    const isPR = user.status === 'ПР';
 
-    // 4. Крутим
+    // ⚡ ПР — без разрешения и без лимита
+    if (!isPR) {
+      // 1. Разрешение
+      const permRes = await pool.query('SELECT * FROM casino_permission WHERE phone=$1', [phone]);
+      if (permRes.rows.length === 0) {
+        return res.status(403).json({ error: 'Нужно Разрешение на казик от ПР' });
+      }
+
+      // 2. Лимит 10/день
+      const today = new Date().toISOString().slice(0, 10);
+      const dailyRes = await pool.query('SELECT * FROM casino_daily WHERE phone=$1', [phone]);
+      if (dailyRes.rows.length > 0) {
+        const d = dailyRes.rows[0];
+        if (d.last_date === today && d.count >= 10) {
+          return res.status(403).json({ error: 'Лимит 10 игр в день исчерпан' });
+        }
+      }
+    }
+
+    // Баланс
+    if (user.tonki < bet) {
+      return res.status(400).json({ error: 'Недостаточно тонков', need: bet - user.tonki });
+    }
+
+    // Барабаны
     const symbols = ['🍎', '🍇', '🍑', '🍌'];
     const weights = [34, 33, 30, 3];
     const pickWeighted = () => {
@@ -366,84 +372,46 @@ app.post('/api/casino/spin', async (req, res) => {
     };
 
     const reels = [pickWeighted(), pickWeighted(), pickWeighted()];
-    const bananaCount = reels.filter(r => r === '🍌').length;
-    const allSame = reels[0] === reels[1] && reels[1] === reels[2];
-    const twoSame = !allSame && (reels[0] === reels[1] || reels[1] === reels[2] || reels[0] === reels[2]);
 
-    // Подсчёты
     const appleCount = reels.filter(r => r === '🍎').length;
     const grapeCount = reels.filter(r => r === '🍇').length;
     const plumCount = reels.filter(r => r === '🍑').length;
+    const bananaCount = reels.filter(r => r === '🍌').length;
 
     let winAmount = 0;
     let prizeType = 'lose';
 
-    // ═══ 3 БАНАНА ═══
-    if (bananaCount === 3) {
-      winAmount = Math.floor(bet * 16);
-      prizeType = 'jackpot_banana';
-    }
-    // ═══ 2 БАНАНА ═══
-    else if (bananaCount === 2) {
-      winAmount = Math.floor(bet * 8);
-      prizeType = 'double_banana';
-    }
-    // ═══ 1 БАНАН ═══
-    else if (bananaCount === 1) {
-      winAmount = Math.floor(bet * 4);
-      prizeType = 'banana';
-    }
-    // ═══ БЕЗ БАНАНОВ — 3 одинаковых ═══
-    else if (appleCount === 3) {
-      winAmount = Math.floor(bet * 2);
-      prizeType = 'triple_apple';
-    }
-    else if (grapeCount === 3) {
-      winAmount = Math.floor(bet * 4);
-      prizeType = 'triple_grape';
-    }
-    else if (plumCount === 3) {
-      winAmount = Math.floor(bet * 8);
-      prizeType = 'triple_plum';
-    }
-    // ═══ БЕЗ БАНАНОВ — ровно 2 одинаковых ═══
-    else if (grapeCount === 2) {
-      winAmount = Math.floor(bet * 3);
-      prizeType = 'double_grape';
-    }
-    else if (plumCount === 2) {
-      winAmount = Math.floor(bet * 2);
-      prizeType = 'double_plum';
-    }
-    else if (appleCount === 2) {
-      winAmount = Math.floor(bet * 1.5);
-      prizeType = 'double_apple';
-    }
-    // ═══ БЕЗ БАНАНОВ — 1 виноград/слива ═══
-    else if (grapeCount === 1) {
-      winAmount = Math.floor(bet * 1.6);
-      prizeType = 'one_grape';
-    }
-    else if (plumCount === 1) {
-      winAmount = Math.floor(bet * 1.2);
-      prizeType = 'one_plum';
-    }
-    // ═══ Всё разное (только яблоки) или просто яблоко ═══
-    else {
-      winAmount = 0;
-      prizeType = 'lose';
-    }
+    if (bananaCount === 3) { winAmount = Math.floor(bet * 16); prizeType = 'jackpot_banana'; }
+    else if (bananaCount === 2) { winAmount = Math.floor(bet * 8); prizeType = 'double_banana'; }
+    else if (bananaCount === 1) { winAmount = Math.floor(bet * 4); prizeType = 'banana'; }
+    else if (appleCount === 3) { winAmount = Math.floor(bet * 2); prizeType = 'triple_apple'; }
+    else if (grapeCount === 3) { winAmount = Math.floor(bet * 4); prizeType = 'triple_grape'; }
+    else if (plumCount === 3) { winAmount = Math.floor(bet * 8); prizeType = 'triple_plum'; }
+    else if (grapeCount === 2) { winAmount = Math.floor(bet * 3); prizeType = 'double_grape'; }
+    else if (plumCount === 2) { winAmount = Math.floor(bet * 2); prizeType = 'double_plum'; }
+    else if (appleCount === 2) { winAmount = Math.floor(bet * 1.5); prizeType = 'double_apple'; }
+    else if (grapeCount === 1) { winAmount = Math.floor(bet * 1.6); prizeType = 'one_grape'; }
+    else if (plumCount === 1) { winAmount = Math.floor(bet * 1.2); prizeType = 'one_plum'; }
+    else { winAmount = 0; prizeType = 'lose'; }
 
     const newTonki = user.tonki - bet + winAmount;
 
     await pool.query('UPDATE users SET tonki=$1 WHERE phone=$2', [newTonki, phone]);
 
-    const newCount = (dailyRes.rows[0]?.last_date === today ? dailyCount : 0) + 1;
-    await pool.query(
-      `INSERT INTO casino_daily (phone, last_date, count) VALUES ($1, $2, $3)
-       ON CONFLICT (phone) DO UPDATE SET last_date=$2, count=$3`,
-      [phone, today, newCount]
-    );
+    // ⚡ Счётчик дня только для НЕ-ПР
+    let gamesLeft = null;
+    if (!isPR) {
+      const today = new Date().toISOString().slice(0, 10);
+      const dailyRes = await pool.query('SELECT * FROM casino_daily WHERE phone=$1', [phone]);
+      const prevCount = (dailyRes.rows[0]?.last_date === today) ? dailyRes.rows[0].count : 0;
+      const newCount = prevCount + 1;
+      await pool.query(
+        `INSERT INTO casino_daily (phone, last_date, count) VALUES ($1, $2, $3)
+         ON CONFLICT (phone) DO UPDATE SET last_date=$2, count=$3`,
+        [phone, today, newCount]
+      );
+      gamesLeft = 10 - newCount;
+    }
 
     await pool.query(
       `INSERT INTO casino_history (id, phone, name, bet, win, reels, date)
@@ -455,7 +423,7 @@ app.post('/api/casino/spin', async (req, res) => {
       ok: true, reels, bet, winAmount,
       netWin: winAmount - bet, prizeType,
       newTonki, oldTonki: user.tonki,
-      gamesToday: newCount, gamesLeft: 10 - newCount,
+      gamesLeft, isPR,
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
