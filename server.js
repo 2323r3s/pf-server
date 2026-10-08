@@ -25,6 +25,7 @@ pool.query('SELECT NOW()')
 // ═══════════════════════════════════════════════════════
 const initDB = async () => {
   try {
+    // ── users ──
     await pool.query(`
       CREATE TABLE IF NOT EXISTS users (
         phone TEXT PRIMARY KEY,
@@ -49,6 +50,7 @@ const initDB = async () => {
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS has_insurance BOOLEAN DEFAULT false`);
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS insurance_until TIMESTAMP`);
 
+    // ── news ──
     await pool.query(`
       CREATE TABLE IF NOT EXISTS news (
         id BIGINT PRIMARY KEY,
@@ -58,16 +60,17 @@ const initDB = async () => {
       )
     `);
 
+    // ── bank ──
     await pool.query(`
       CREATE TABLE IF NOT EXISTS bank (
         phone TEXT PRIMARY KEY,
         deposit INTEGER DEFAULT 0, frozen BOOLEAN DEFAULT false, frozen_at BIGINT
       )
     `);
-
     await pool.query(`ALTER TABLE bank ADD COLUMN IF NOT EXISTS last_interest_at TIMESTAMP`);
     await pool.query(`ALTER TABLE bank ADD COLUMN IF NOT EXISTS total_interest INTEGER DEFAULT 0`);
 
+    // ── interest_history ──
     await pool.query(`
       CREATE TABLE IF NOT EXISTS interest_history (
         id BIGINT PRIMARY KEY,
@@ -78,6 +81,7 @@ const initDB = async () => {
       )
     `);
 
+    // ── fines ──
     await pool.query(`
       CREATE TABLE IF NOT EXISTS fines (
         id BIGINT PRIMARY KEY, phone TEXT NOT NULL, reason TEXT NOT NULL, amount INTEGER NOT NULL,
@@ -85,6 +89,7 @@ const initDB = async () => {
       )
     `);
 
+    // ── friends ──
     await pool.query(`
       CREATE TABLE IF NOT EXISTS friends (
         user_phone TEXT NOT NULL, friend_phone TEXT NOT NULL, type TEXT NOT NULL,
@@ -92,6 +97,7 @@ const initDB = async () => {
       )
     `);
 
+    // ── messages ──
     await pool.query(`
       CREATE TABLE IF NOT EXISTS messages (
         id BIGINT PRIMARY KEY, from_phone TEXT NOT NULL, from_name TEXT NOT NULL,
@@ -99,6 +105,7 @@ const initDB = async () => {
       )
     `);
 
+    // ── private_messages ──
     await pool.query(`
       CREATE TABLE IF NOT EXISTS private_messages (
         id BIGINT PRIMARY KEY, chat_id TEXT NOT NULL, from_phone TEXT NOT NULL,
@@ -106,8 +113,10 @@ const initDB = async () => {
       )
     `);
 
+    // ── docs ──
     await pool.query(`CREATE TABLE IF NOT EXISTS docs (key TEXT PRIMARY KEY, content TEXT NOT NULL)`);
 
+    // ── rate ──
     await pool.query(`
       CREATE TABLE IF NOT EXISTS rate (
         id INTEGER PRIMARY KEY DEFAULT 1,
@@ -117,6 +126,7 @@ const initDB = async () => {
     `);
     await pool.query(`INSERT INTO rate (id, to_rub) VALUES (1, 10) ON CONFLICT (id) DO NOTHING`);
 
+    // ── rate_history ──
     await pool.query(`
       CREATE TABLE IF NOT EXISTS rate_history (
         id SERIAL PRIMARY KEY,
@@ -125,6 +135,7 @@ const initDB = async () => {
       )
     `);
 
+    // ── rate_target ──
     await pool.query(`
       CREATE TABLE IF NOT EXISTS rate_target (
         id INTEGER PRIMARY KEY DEFAULT 1,
@@ -133,6 +144,7 @@ const initDB = async () => {
       )
     `);
 
+    // ── bank_pf ──
     await pool.query(`
       CREATE TABLE IF NOT EXISTS bank_pf (
         id INTEGER PRIMARY KEY DEFAULT 1, amount BIGINT NOT NULL DEFAULT 3124000000000
@@ -140,6 +152,7 @@ const initDB = async () => {
     `);
     await pool.query(`INSERT INTO bank_pf (id, amount) VALUES (1, 3124000000000) ON CONFLICT (id) DO NOTHING`);
 
+    // ── appeals ──
     await pool.query(`
       CREATE TABLE IF NOT EXISTS appeals (
         id BIGINT PRIMARY KEY,
@@ -155,6 +168,7 @@ const initDB = async () => {
       )
     `);
 
+    // ── doc_requests ──
     await pool.query(`
       CREATE TABLE IF NOT EXISTS doc_requests (
         id BIGINT PRIMARY KEY,
@@ -169,6 +183,7 @@ const initDB = async () => {
       )
     `);
 
+    // ── aura_history ──
     await pool.query(`
       CREATE TABLE IF NOT EXISTS aura_history (
         id BIGINT PRIMARY KEY,
@@ -179,6 +194,7 @@ const initDB = async () => {
       )
     `);
 
+    // ── salary_paid ──
     await pool.query(`
       CREATE TABLE IF NOT EXISTS salary_paid (
         phone TEXT PRIMARY KEY,
@@ -186,6 +202,7 @@ const initDB = async () => {
       )
     `);
 
+    // ── elections ──
     await pool.query(`
       CREATE TABLE IF NOT EXISTS elections (
         id INTEGER PRIMARY KEY DEFAULT 1,
@@ -197,6 +214,7 @@ const initDB = async () => {
       )
     `);
 
+    // ── election_candidates ──
     await pool.query(`
       CREATE TABLE IF NOT EXISTS election_candidates (
         election_id INTEGER NOT NULL,
@@ -208,6 +226,7 @@ const initDB = async () => {
       )
     `);
 
+    // ── election_votes ──
     await pool.query(`
       CREATE TABLE IF NOT EXISTS election_votes (
         election_id INTEGER NOT NULL,
@@ -218,6 +237,7 @@ const initDB = async () => {
       )
     `);
 
+    // ── casino_history ──
     await pool.query(`
       CREATE TABLE IF NOT EXISTS casino_history (
         id BIGINT PRIMARY KEY,
@@ -230,15 +250,7 @@ const initDB = async () => {
       )
     `);
 
-    console.log('✅ Таблицы готовы');
-  } catch (err) {
-    console.error('❌ Ошибка таблиц:', err.stack || err.message);
-  }
-};
-
-initDB();
-
-    // Лимит игр в казино — по дням
+    // ── casino_daily ──
     await pool.query(`
       CREATE TABLE IF NOT EXISTS casino_daily (
         phone TEXT PRIMARY KEY,
@@ -247,7 +259,7 @@ initDB();
       )
     `);
 
-    // Разрешение на казино
+    // ── casino_permission ──
     await pool.query(`
       CREATE TABLE IF NOT EXISTS casino_permission (
         phone TEXT PRIMARY KEY,
@@ -255,6 +267,14 @@ initDB();
         granted_by TEXT
       )
     `);
+
+    console.log('✅ Таблицы готовы');
+  } catch (err) {
+    console.error('❌ Ошибка таблиц:', err.stack || err.message);
+  }
+};
+
+initDB();
 
 // ═══════════════════════════════════════════════════════
 // ГЛАВНАЯ
@@ -308,38 +328,33 @@ app.post('/api/casino/spin', async (req, res) => {
       return res.status(400).json({ error: 'Ставка 20-1000' });
     }
 
-    // ⚡ 1. Проверяем РАЗРЕШЕНИЕ на казик
+    // 1. Разрешение
     const permRes = await pool.query('SELECT * FROM casino_permission WHERE phone=$1', [phone]);
     if (permRes.rows.length === 0) {
       return res.status(403).json({ error: 'Нужно Разрешение на казик от ПР' });
     }
 
-    // ⚡ 2. Проверяем ЛИМИТ 10 игр в день
-    const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+    // 2. Лимит 10/день
+    const today = new Date().toISOString().slice(0, 10);
     const dailyRes = await pool.query('SELECT * FROM casino_daily WHERE phone=$1', [phone]);
     let dailyCount = 0;
     if (dailyRes.rows.length > 0) {
       const d = dailyRes.rows[0];
       if (d.last_date === today) {
         dailyCount = d.count;
-        if (dailyCount >= 10) {
-          return res.status(403).json({ error: 'Лимит 10 игр в день исчерпан' });
-        }
+        if (dailyCount >= 10) return res.status(403).json({ error: 'Лимит 10 игр в день исчерпан' });
       }
     }
 
-    // ⚡ 3. Проверяем баланс
+    // 3. Баланс
     const userRes = await pool.query('SELECT * FROM users WHERE phone=$1', [phone]);
     if (userRes.rows.length === 0) return res.status(404).json({ error: 'Not found' });
     const user = userRes.rows[0];
-    if (user.tonki < bet) {
-      return res.status(400).json({ error: 'Недостаточно тонков', need: bet - user.tonki });
-    }
+    if (user.tonki < bet) return res.status(400).json({ error: 'Недостаточно тонков', need: bet - user.tonki });
 
-    // ⚡ 4. Крутим барабаны
+    // 4. Крутим
     const symbols = ['🍎', '🍇', '🍑', '🍌'];
     const weights = [34, 33, 30, 3];
-
     const pickWeighted = () => {
       const total = weights.reduce((s, w) => s + w, 0);
       let r = Math.random() * total;
@@ -351,7 +366,6 @@ app.post('/api/casino/spin', async (req, res) => {
     };
 
     const reels = [pickWeighted(), pickWeighted(), pickWeighted()];
-
     const bananaCount = reels.filter(r => r === '🍌').length;
     const allSame = reels[0] === reels[1] && reels[1] === reels[2];
     const twoSame = !allSame && (reels[0] === reels[1] || reels[1] === reels[2] || reels[0] === reels[2]);
@@ -359,38 +373,19 @@ app.post('/api/casino/spin', async (req, res) => {
     let winAmount = 0;
     let prizeType = '';
 
-    if (allSame && reels[0] === '🍌') {
-      winAmount = Math.floor(bet * 16);
-      prizeType = 'jackpot_banana';
-    } else if (allSame && reels[0] === '🍑') {
-      winAmount = Math.floor(bet * 8);
-      prizeType = 'triple_plum';
-    } else if (allSame && reels[0] === '🍇') {
-      winAmount = Math.floor(bet * 4);
-      prizeType = 'triple_grape';
-    } else if (allSame && reels[0] === '🍎') {
-      winAmount = Math.floor(bet * 2);
-      prizeType = 'triple_apple';
-    } else if (bananaCount === 2) {
-      winAmount = 150;
-      prizeType = 'double_banana';
-    } else if (bananaCount === 1) {
-      winAmount = 50;
-      prizeType = 'banana';
-    } else if (twoSame) {
-      winAmount = Math.floor(bet * 2);
-      prizeType = 'double';
-    } else {
-      winAmount = 0;
-      prizeType = 'lose';
-    }
+    if (allSame && reels[0] === '🍌') { winAmount = Math.floor(bet * 16); prizeType = 'jackpot_banana'; }
+    else if (allSame && reels[0] === '🍑') { winAmount = Math.floor(bet * 8); prizeType = 'triple_plum'; }
+    else if (allSame && reels[0] === '🍇') { winAmount = Math.floor(bet * 4); prizeType = 'triple_grape'; }
+    else if (allSame && reels[0] === '🍎') { winAmount = Math.floor(bet * 2); prizeType = 'triple_apple'; }
+    else if (bananaCount === 2) { winAmount = 150; prizeType = 'double_banana'; }
+    else if (bananaCount === 1) { winAmount = 50; prizeType = 'banana'; }
+    else if (twoSame) { winAmount = Math.floor(bet * 2); prizeType = 'double'; }
+    else { winAmount = 0; prizeType = 'lose'; }
 
     const newTonki = user.tonki - bet + winAmount;
 
-    // ⚡ 5. Обновляем баланс
     await pool.query('UPDATE users SET tonki=$1 WHERE phone=$2', [newTonki, phone]);
 
-    // ⚡ 6. Обновляем счётчик дня
     const newCount = (dailyRes.rows[0]?.last_date === today ? dailyCount : 0) + 1;
     await pool.query(
       `INSERT INTO casino_daily (phone, last_date, count) VALUES ($1, $2, $3)
@@ -398,7 +393,6 @@ app.post('/api/casino/spin', async (req, res) => {
       [phone, today, newCount]
     );
 
-    // ⚡ 7. Пишем в историю
     await pool.query(
       `INSERT INTO casino_history (id, phone, name, bet, win, reels, date)
        VALUES ($1,$2,$3,$4,$5,$6,$7)`,
@@ -421,23 +415,16 @@ app.get('/api/casino/history/:phone', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Сколько игр сегодня + есть ли разрешение
 app.get('/api/casino/daily/:phone', async (req, res) => {
   try {
     const today = new Date().toISOString().slice(0, 10);
     const daily = await pool.query('SELECT * FROM casino_daily WHERE phone=$1', [req.params.phone]);
     const perm = await pool.query('SELECT * FROM casino_permission WHERE phone=$1', [req.params.phone]);
-
     const count = (daily.rows[0]?.last_date === today) ? daily.rows[0].count : 0;
-    res.json({
-      count,
-      left: Math.max(0, 10 - count),
-      hasPermission: perm.rows.length > 0,
-    });
+    res.json({ count, left: Math.max(0, 10 - count), hasPermission: perm.rows.length > 0 });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// ПР выдаёт разрешение
 app.post('/api/casino/permission', async (req, res) => {
   try {
     const { phone, grantedBy } = req.body;
@@ -451,7 +438,6 @@ app.post('/api/casino/permission', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Отозвать разрешение
 app.delete('/api/casino/permission/:phone', async (req, res) => {
   try {
     await pool.query('DELETE FROM casino_permission WHERE phone=$1', [req.params.phone]);
@@ -459,7 +445,6 @@ app.delete('/api/casino/permission/:phone', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Список всех разрешений (для ПР)
 app.get('/api/casino/permissions', async (req, res) => {
   try {
     const r = await pool.query('SELECT * FROM casino_permission');
@@ -652,11 +637,8 @@ app.get('/api/bank', async (req, res) => {
     const obj = {};
     r.rows.forEach(x => {
       obj[x.phone] = {
-        deposit: x.deposit,
-        frozen: x.frozen,
-        frozenAt: x.frozen_at,
-        lastInterestAt: x.last_interest_at,
-        totalInterest: x.total_interest || 0,
+        deposit: x.deposit, frozen: x.frozen, frozenAt: x.frozen_at,
+        lastInterestAt: x.last_interest_at, totalInterest: x.total_interest || 0,
       };
     });
     res.json(obj);
@@ -675,13 +657,9 @@ app.post('/api/bank/:phone', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// ═══════════════════════════════════════════════════════
-// ПРОЦЕНТЫ В БАНКЕ (30% годовых)
-// ═══════════════════════════════════════════════════════
 app.post('/api/bank/:phone/accrue', async (req, res) => {
   try {
     const phone = req.params.phone;
-
     const bankRes = await pool.query('SELECT * FROM bank WHERE phone=$1', [phone]);
     if (bankRes.rows.length === 0) return res.json({ accrued: 0 });
 
@@ -692,7 +670,6 @@ app.post('/api/bank/:phone/accrue', async (req, res) => {
     const now = Date.now();
     const lastAt = acc.last_interest_at ? new Date(acc.last_interest_at).getTime() : (acc.frozen_at || now);
     const daysPassed = (now - lastAt) / (24 * 60 * 60 * 1000);
-
     if (daysPassed < 1) return res.json({ accrued: 0 });
 
     const interest = Math.floor(acc.deposit * (0.3 / 365) * daysPassed);
@@ -705,7 +682,6 @@ app.post('/api/bank/:phone/accrue', async (req, res) => {
       `UPDATE bank SET deposit=$1, last_interest_at=NOW(), total_interest=$2 WHERE phone=$3`,
       [newDeposit, newTotal, phone]
     );
-
     await pool.query(
       `INSERT INTO interest_history (id, phone, amount, deposit, date)
        VALUES ($1,$2,$3,$4,$5)`,
@@ -733,8 +709,6 @@ app.get('/api/messages', async (req, res) => {
       id: m.id, from: m.from_phone, fromName: m.from_name,
       fromAvatar: m.from_avatar, fromStatus: m.from_status,
       text: m.text, time: m.time, date: m.date,
-      type: m.type || 'text',
-      audio: m.audio || null,
     })));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -743,9 +717,9 @@ app.post('/api/messages', async (req, res) => {
   try {
     const m = req.body;
     await pool.query(
-      `INSERT INTO messages (id, from_phone, from_name, from_avatar, from_status, text, time, date, type, audio)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (id) DO NOTHING`,
-      [m.id, m.from, m.fromName, m.fromAvatar, m.fromStatus, m.text || '', m.time, m.date, m.type || 'text', m.audio || null]
+      `INSERT INTO messages (id, from_phone, from_name, from_avatar, from_status, text, time, date)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (id) DO NOTHING`,
+      [m.id, m.from, m.fromName, m.fromAvatar, m.fromStatus, m.text || '', m.time, m.date]
     );
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -760,8 +734,6 @@ app.get('/api/private/:chatId', async (req, res) => {
     res.json(r.rows.map(m => ({
       id: m.id, from: m.from_phone, fromName: m.from_name,
       text: m.text, time: m.time,
-      type: m.type || 'text',
-      audio: m.audio || null,
     })));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -770,9 +742,9 @@ app.post('/api/private', async (req, res) => {
   try {
     const m = req.body;
     await pool.query(
-      `INSERT INTO private_messages (id, chat_id, from_phone, from_name, text, time, type, audio)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (id) DO NOTHING`,
-      [m.id, m.chatId, m.from, m.fromName, m.text || '', m.time, m.type || 'text', m.audio || null]
+      `INSERT INTO private_messages (id, chat_id, from_phone, from_name, text, time)
+       VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (id) DO NOTHING`,
+      [m.id, m.chatId, m.from, m.fromName, m.text || '', m.time]
     );
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -976,12 +948,10 @@ app.post('/api/appeals/:id/resolve', async (req, res) => {
     const appealRes = await pool.query('SELECT * FROM appeals WHERE id=$1', [req.params.id]);
     if (appealRes.rows.length === 0) return res.status(404).json({ error: 'Not found' });
     const appeal = appealRes.rows[0];
-
     await pool.query(
       `UPDATE appeals SET status=$1, pr_comment=$2, resolved_at=$3, resolved_by=$4 WHERE id=$5`,
       [status, prComment || null, new Date().toISOString(), resolvedBy || null, req.params.id]
     );
-
     if (status === 'approved') {
       await pool.query('DELETE FROM fines WHERE id=$1', [appeal.fine_id]);
     }
@@ -1031,6 +1001,13 @@ app.post('/api/doc_requests/:id/resolve', async (req, res) => {
       } else if (request.doc_type === 'insurance') {
         const until = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString();
         await pool.query('UPDATE users SET has_insurance=true, insurance_until=$1 WHERE phone=$2', [until, request.user_phone]);
+      } else if (request.doc_type === 'casino_permit') {
+        await pool.query(
+          `INSERT INTO casino_permission (phone, granted_at, granted_by)
+           VALUES ($1, $2, $3)
+           ON CONFLICT (phone) DO UPDATE SET granted_at=$2, granted_by=$3`,
+          [request.user_phone, new Date().toISOString(), resolvedBy || 'ПР']
+        );
       }
     }
     res.json({ ok: true });
