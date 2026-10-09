@@ -315,7 +315,73 @@ const initDB = async () => {
       )
     `);
 
-    console.log('✅ Таблицы готовы');
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS profession_salary_paid (
+    id BIGINT PRIMARY KEY,
+    phone TEXT NOT NULL,
+    profession TEXT NOT NULL,
+    amount INTEGER NOT NULL,
+    paid_by TEXT,
+    paid_at TIMESTAMP DEFAULT NOW()
+  )
+`);
+
+// ═══ ПАРТИИ ═══
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS parties (
+    id BIGINT PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    leader_phone TEXT NOT NULL,
+    leader_name TEXT NOT NULL,
+    avatar TEXT,
+    created_at TEXT NOT NULL
+  )
+`);
+
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS party_members (
+    party_id BIGINT NOT NULL,
+    phone TEXT NOT NULL,
+    name TEXT NOT NULL,
+    joined_at TEXT NOT NULL,
+    PRIMARY KEY (party_id, phone)
+  )
+`);
+
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS party_requests (
+    id BIGINT PRIMARY KEY,
+    party_id BIGINT NOT NULL,
+    user_phone TEXT NOT NULL,
+    user_name TEXT NOT NULL,
+    status TEXT DEFAULT 'pending',
+    created_at TEXT NOT NULL,
+    resolved_at TEXT
+  )
+`);
+
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS party_messages (
+    id BIGINT PRIMARY KEY,
+    party_id BIGINT NOT NULL,
+    from_phone TEXT NOT NULL,
+    from_name TEXT NOT NULL,
+    text TEXT NOT NULL,
+    time TEXT NOT NULL
+  )
+`);
+
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS party_candidates (
+    party_id BIGINT PRIMARY KEY,
+    phone TEXT NOT NULL,
+    name TEXT NOT NULL
+  )
+`);
+
+await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS has_created_party BOOLEAN DEFAULT false`);
+
+console.log('✅ Таблицы готовы');
   } catch (err) {
     console.error('❌ Ошибка таблиц:', err.stack || err.message);
   }
@@ -360,6 +426,353 @@ app.post('/api/users', async (req, res) => {
 app.delete('/api/users/:phone', async (req, res) => {
   try {
     await pool.query('DELETE FROM users WHERE phone=$1', [req.params.phone]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ═══════════════════════════════════════════════════════
+// ПАРТИИ
+// ═══════════════════════════════════════════════════════
+
+// Получить все партии (с участниками и кандидатами)
+app.get('/api/parties', async (req, res) => {
+  try {
+    const partiesRes = await pool.query('SELECT * FROM parties ORDER BY id ASC');
+    const parties = [];
+    for (const p of partiesRes.rows) {
+      const membersRes = await pool.query(
+        'SELECT * FROM party_members WHERE party_id=$1 ORDER BY joined_at ASC',
+        [p.id]
+      );
+      const candRes = await pool.query(
+        'SELECT * FROM party_candidates WHERE party_id=$1',
+        [p.id]
+      );
+      parties.push({
+        id: p.id,
+        name: p.name,
+        leaderPhone: p.leader_phone,
+        leaderName: p.leader_name,
+        avatar: p.avatar,
+        createdAt: p.created_at,
+        members: membersRes.rows.map(m => ({
+          phone: m.phone,
+          name: m.name,
+          joinedAt: m.joined_at,
+        })),
+        candidate: candRes.rows.length > 0 ? {
+          phone: candRes.rows[0].phone,
+          name: candRes.rows[0].name,
+        } : null,
+      });
+    }
+    res.json(parties);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Создать партию
+app.post('/api/parties', async (req, res) => {
+  try {
+    const { userPhone, userName, name } = req.body;
+    if (!userPhone || !name) return res.status(400).json({ error: 'Bad params' });
+
+    const trimmed = name.trim();
+    if (trimmed.length < 2) return res.status(400).json({ error: 'Название минимум 2 символа' });
+    if (trimmed.length > 40) return res.status(400).json({ error: 'Название максимум 40 символов' });
+
+    // Проверка: юзер уже создавал партию?
+    const uRes = await pool.query('SELECT has_created_party FROM users WHERE phone=$1', [userPhone]);
+    if (uRes.rows.length === 0) return res.status(404).json({ error: 'User not found' });
+    if (uRes.rows[0].has_created_party) {
+      return res.status(400).json({ error: 'Ты уже создавал партию. Можно только 1 раз.' });
+    }
+
+    // Максимум 3 партии
+    const cntRes = await pool.query('SELECT COUNT(*) FROM parties');
+    if (parseInt(cntRes.rows[0].count) >= 3) {
+      return res.status(400).json({ error: 'Максимум 3 партии в ПФ' });
+    }
+
+    // Название занято?
+    const dupRes = await pool.query('SELECT id FROM parties WHERE LOWER(name)=LOWER($1)', [trimmed]);
+    if (dupRes.rows.length > 0) return res.status(400).json({ error: 'Такое название уже занято' });
+
+    // Юзер не в партии?
+    const inPartyRes = await pool.query('SELECT party_id FROM party_members WHERE phone=$1', [userPhone]);
+    if (inPartyRes.rows.length > 0) return res.status(400).json({ error: 'Ты уже в партии' });
+
+    const id = Date.now();
+    const now = new Date().toISOString();
+
+    await pool.query(
+      `INSERT INTO parties (id, name, leader_phone, leader_name, created_at)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [id, trimmed, userPhone, userName, now]
+    );
+
+    await pool.query(
+      `INSERT INTO party_members (party_id, phone, name, joined_at)
+       VALUES ($1, $2, $3, $4)`,
+      [id, userPhone, userName, now]
+    );
+
+    await pool.query('UPDATE users SET has_created_party=true WHERE phone=$1', [userPhone]);
+
+    res.json({ ok: true, partyId: id });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Переименовать партию
+app.post('/api/parties/:id/rename', async (req, res) => {
+  try {
+    const { userPhone, name } = req.body;
+    const trimmed = (name || '').trim();
+    if (trimmed.length < 2) return res.status(400).json({ error: 'Минимум 2 символа' });
+    if (trimmed.length > 40) return res.status(400).json({ error: 'Максимум 40 символов' });
+
+    const pRes = await pool.query('SELECT * FROM parties WHERE id=$1', [req.params.id]);
+    if (pRes.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    if (pRes.rows[0].leader_phone !== userPhone) return res.status(403).json({ error: 'Ты не глава' });
+
+    const dupRes = await pool.query(
+      'SELECT id FROM parties WHERE LOWER(name)=LOWER($1) AND id<>$2',
+      [trimmed, req.params.id]
+    );
+    if (dupRes.rows.length > 0) return res.status(400).json({ error: 'Такое название занято' });
+
+    await pool.query('UPDATE parties SET name=$1 WHERE id=$2', [trimmed, req.params.id]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Сменить аватарку партии
+app.post('/api/parties/:id/avatar', async (req, res) => {
+  try {
+    const { userPhone, avatar } = req.body;
+    const pRes = await pool.query('SELECT * FROM parties WHERE id=$1', [req.params.id]);
+    if (pRes.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    if (pRes.rows[0].leader_phone !== userPhone) return res.status(403).json({ error: 'Ты не глава' });
+
+    await pool.query('UPDATE parties SET avatar=$1 WHERE id=$2', [avatar || null, req.params.id]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Удалить партию (глава или ПР)
+app.delete('/api/parties/:id', async (req, res) => {
+  try {
+    const { userPhone } = req.body;
+    const pRes = await pool.query('SELECT * FROM parties WHERE id=$1', [req.params.id]);
+    if (pRes.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+
+    const uRes = await pool.query('SELECT status FROM users WHERE phone=$1', [userPhone]);
+    const isPR = uRes.rows.length > 0 && uRes.rows[0].status === 'ПР';
+    const isLeader = pRes.rows[0].leader_phone === userPhone;
+
+    if (!isPR && !isLeader) return res.status(403).json({ error: 'Нет прав' });
+
+    await pool.query('DELETE FROM party_messages WHERE party_id=$1', [req.params.id]);
+    await pool.query('DELETE FROM party_candidates WHERE party_id=$1', [req.params.id]);
+    await pool.query('DELETE FROM party_requests WHERE party_id=$1', [req.params.id]);
+    await pool.query('DELETE FROM party_members WHERE party_id=$1', [req.params.id]);
+    await pool.query('DELETE FROM parties WHERE id=$1', [req.params.id]);
+
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Заявка на вступление
+app.post('/api/parties/:id/join', async (req, res) => {
+  try {
+    const { userPhone, userName } = req.body;
+    const pRes = await pool.query('SELECT * FROM parties WHERE id=$1', [req.params.id]);
+    if (pRes.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+
+    const membersRes = await pool.query('SELECT COUNT(*) FROM party_members WHERE party_id=$1', [req.params.id]);
+    if (parseInt(membersRes.rows[0].count) >= 3) {
+      return res.status(400).json({ error: 'Партия заполнена' });
+    }
+
+    const inPartyRes = await pool.query('SELECT party_id FROM party_members WHERE phone=$1', [userPhone]);
+    if (inPartyRes.rows.length > 0) return res.status(400).json({ error: 'Ты уже в партии' });
+
+    const dupReq = await pool.query(
+      `SELECT id FROM party_requests WHERE party_id=$1 AND user_phone=$2 AND status='pending'`,
+      [req.params.id, userPhone]
+    );
+    if (dupReq.rows.length > 0) return res.status(400).json({ error: 'Заявка уже отправлена' });
+
+    await pool.query(
+      `INSERT INTO party_requests (id, party_id, user_phone, user_name, status, created_at)
+       VALUES ($1, $2, $3, $4, 'pending', $5)`,
+      [Date.now(), req.params.id, userPhone, userName, new Date().toISOString()]
+    );
+
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Получить заявки партии (только глава)
+app.get('/api/parties/:id/requests', async (req, res) => {
+  try {
+    const { userPhone } = req.query;
+    const pRes = await pool.query('SELECT * FROM parties WHERE id=$1', [req.params.id]);
+    if (pRes.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    if (pRes.rows[0].leader_phone !== userPhone) return res.status(403).json({ error: 'Не глава' });
+
+    const r = await pool.query(
+      `SELECT * FROM party_requests WHERE party_id=$1 AND status='pending' ORDER BY id ASC`,
+      [req.params.id]
+    );
+    res.json(r.rows.map(x => ({
+      id: x.id, partyId: x.party_id, userPhone: x.user_phone,
+      userName: x.user_name, status: x.status, createdAt: x.created_at,
+    })));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Принять/отклонить заявку
+app.post('/api/party_requests/:id/resolve', async (req, res) => {
+  try {
+    const { status, userPhone } = req.body;
+    if (!['approved', 'rejected'].includes(status)) return res.status(400).json({ error: 'Bad status' });
+
+    const rRes = await pool.query('SELECT * FROM party_requests WHERE id=$1', [req.params.id]);
+    if (rRes.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    const request = rRes.rows[0];
+
+    const pRes = await pool.query('SELECT * FROM parties WHERE id=$1', [request.party_id]);
+    if (pRes.rows.length === 0) return res.status(404).json({ error: 'Party not found' });
+    if (pRes.rows[0].leader_phone !== userPhone) return res.status(403).json({ error: 'Не глава' });
+
+    await pool.query(
+      `UPDATE party_requests SET status=$1, resolved_at=$2 WHERE id=$3`,
+      [status, new Date().toISOString(), req.params.id]
+    );
+
+    if (status === 'approved') {
+      const cntRes = await pool.query('SELECT COUNT(*) FROM party_members WHERE party_id=$1', [request.party_id]);
+      if (parseInt(cntRes.rows[0].count) >= 3) {
+        return res.status(400).json({ error: 'Партия уже заполнена' });
+      }
+      await pool.query(
+        `INSERT INTO party_members (party_id, phone, name, joined_at)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT DO NOTHING`,
+        [request.party_id, request.user_phone, request.user_name, new Date().toISOString()]
+      );
+    }
+
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Убрать участника (глава)
+app.delete('/api/parties/:id/members/:phone', async (req, res) => {
+  try {
+    const { userPhone } = req.body;
+    const pRes = await pool.query('SELECT * FROM parties WHERE id=$1', [req.params.id]);
+    if (pRes.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    if (pRes.rows[0].leader_phone !== userPhone) return res.status(403).json({ error: 'Не глава' });
+    if (req.params.phone === userPhone) return res.status(400).json({ error: 'Себя нельзя убрать' });
+
+    await pool.query(
+      'DELETE FROM party_members WHERE party_id=$1 AND phone=$2',
+      [req.params.id, req.params.phone]
+    );
+    await pool.query(
+      'DELETE FROM party_candidates WHERE party_id=$1 AND phone=$2',
+      [req.params.id, req.params.phone]
+    );
+
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Выйти из партии (участник, не глава)
+app.post('/api/parties/:id/leave', async (req, res) => {
+  try {
+    const { userPhone } = req.body;
+    const pRes = await pool.query('SELECT * FROM parties WHERE id=$1', [req.params.id]);
+    if (pRes.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    if (pRes.rows[0].leader_phone === userPhone) {
+      return res.status(400).json({ error: 'Глава не может выйти. Удали партию.' });
+    }
+
+    await pool.query(
+      'DELETE FROM party_members WHERE party_id=$1 AND phone=$2',
+      [req.params.id, userPhone]
+    );
+    await pool.query(
+      'DELETE FROM party_candidates WHERE party_id=$1 AND phone=$2',
+      [req.params.id, userPhone]
+    );
+
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Назначить кандидата (глава)
+app.post('/api/parties/:id/candidate', async (req, res) => {
+  try {
+    const { userPhone, candidatePhone, candidateName } = req.body;
+    const pRes = await pool.query('SELECT * FROM parties WHERE id=$1', [req.params.id]);
+    if (pRes.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    if (pRes.rows[0].leader_phone !== userPhone) return res.status(403).json({ error: 'Не глава' });
+
+    const memRes = await pool.query(
+      'SELECT * FROM party_members WHERE party_id=$1 AND phone=$2',
+      [req.params.id, candidatePhone]
+    );
+    if (memRes.rows.length === 0) return res.status(400).json({ error: 'Этот ЖИ не в партии' });
+
+    await pool.query(
+      `INSERT INTO party_candidates (party_id, phone, name)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (party_id) DO UPDATE SET phone=$2, name=$3`,
+      [req.params.id, candidatePhone, candidateName]
+    );
+
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Снять кандидата (глава)
+app.delete('/api/parties/:id/candidate', async (req, res) => {
+  try {
+    const { userPhone } = req.body;
+    const pRes = await pool.query('SELECT * FROM parties WHERE id=$1', [req.params.id]);
+    if (pRes.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    if (pRes.rows[0].leader_phone !== userPhone) return res.status(403).json({ error: 'Не глава' });
+
+    await pool.query('DELETE FROM party_candidates WHERE party_id=$1', [req.params.id]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Сообщения чата партии
+app.get('/api/party_messages/:partyId', async (req, res) => {
+  try {
+    const r = await pool.query(
+      'SELECT * FROM party_messages WHERE party_id=$1 ORDER BY id ASC LIMIT 200',
+      [req.params.partyId]
+    );
+    res.json(r.rows.map(m => ({
+      id: m.id, partyId: m.party_id, from: m.from_phone,
+      fromName: m.from_name, text: m.text, time: m.time,
+    })));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/party_messages', async (req, res) => {
+  try {
+    const m = req.body;
+    await pool.query(
+      `INSERT INTO party_messages (id, party_id, from_phone, from_name, text, time)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (id) DO NOTHING`,
+      [m.id, m.partyId, m.from, m.fromName, m.text || '', m.time]
+    );
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
