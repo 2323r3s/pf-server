@@ -1411,7 +1411,7 @@ app.post('/api/doc_requests/:id/resolve', async (req, res) => {
     if (reqRes.rows.length === 0) return res.status(404).json({ error: 'Not found' });
     const request = reqRes.rows[0];
 
-    // ═══ ПРОВЕРКИ ДЛЯ pm_status ДО обновления заявки ═══
+    // ═══ ПРЕДВАРИТЕЛЬНЫЕ ПРОВЕРКИ ДЛЯ pm_status ═══
     if (status === 'approved' && request.doc_type === 'pm_status') {
       const uRes = await pool.query('SELECT aura, tonki, status FROM users WHERE phone=$1', [request.user_phone]);
       if (uRes.rows.length === 0) {
