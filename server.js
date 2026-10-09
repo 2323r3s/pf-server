@@ -39,7 +39,8 @@ const initDB = async () => {
         is_banned BOOLEAN DEFAULT false,
         ban_reason TEXT,
         ban_type TEXT,
-        stamp_until TIMESTAMP
+        stamp_until TIMESTAMP,
+        has_created_party BOOLEAN DEFAULT false
       )
     `);
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS has_pension BOOLEAN DEFAULT false`);
@@ -49,6 +50,7 @@ const initDB = async () => {
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS ban_reason TEXT`);
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS ban_type TEXT`);
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS stamp_until TIMESTAMP`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS has_created_party BOOLEAN DEFAULT false`);
 
     await pool.query(`
       CREATE TABLE IF NOT EXISTS news (
@@ -315,73 +317,60 @@ const initDB = async () => {
       )
     `);
 
-await pool.query(`
-  CREATE TABLE IF NOT EXISTS profession_salary_paid (
-    id BIGINT PRIMARY KEY,
-    phone TEXT NOT NULL,
-    profession TEXT NOT NULL,
-    amount INTEGER NOT NULL,
-    paid_by TEXT,
-    paid_at TIMESTAMP DEFAULT NOW()
-  )
-`);
+    // ═══ ПАРТИИ ═══
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS parties (
+        id BIGINT PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        leader_phone TEXT NOT NULL,
+        leader_name TEXT NOT NULL,
+        avatar TEXT,
+        created_at TEXT NOT NULL
+      )
+    `);
 
-// ═══ ПАРТИИ ═══
-await pool.query(`
-  CREATE TABLE IF NOT EXISTS parties (
-    id BIGINT PRIMARY KEY,
-    name TEXT NOT NULL UNIQUE,
-    leader_phone TEXT NOT NULL,
-    leader_name TEXT NOT NULL,
-    avatar TEXT,
-    created_at TEXT NOT NULL
-  )
-`);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS party_members (
+        party_id BIGINT NOT NULL,
+        phone TEXT NOT NULL,
+        name TEXT NOT NULL,
+        joined_at TEXT NOT NULL,
+        PRIMARY KEY (party_id, phone)
+      )
+    `);
 
-await pool.query(`
-  CREATE TABLE IF NOT EXISTS party_members (
-    party_id BIGINT NOT NULL,
-    phone TEXT NOT NULL,
-    name TEXT NOT NULL,
-    joined_at TEXT NOT NULL,
-    PRIMARY KEY (party_id, phone)
-  )
-`);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS party_requests (
+        id BIGINT PRIMARY KEY,
+        party_id BIGINT NOT NULL,
+        user_phone TEXT NOT NULL,
+        user_name TEXT NOT NULL,
+        status TEXT DEFAULT 'pending',
+        created_at TEXT NOT NULL,
+        resolved_at TEXT
+      )
+    `);
 
-await pool.query(`
-  CREATE TABLE IF NOT EXISTS party_requests (
-    id BIGINT PRIMARY KEY,
-    party_id BIGINT NOT NULL,
-    user_phone TEXT NOT NULL,
-    user_name TEXT NOT NULL,
-    status TEXT DEFAULT 'pending',
-    created_at TEXT NOT NULL,
-    resolved_at TEXT
-  )
-`);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS party_messages (
+        id BIGINT PRIMARY KEY,
+        party_id BIGINT NOT NULL,
+        from_phone TEXT NOT NULL,
+        from_name TEXT NOT NULL,
+        text TEXT NOT NULL,
+        time TEXT NOT NULL
+      )
+    `);
 
-await pool.query(`
-  CREATE TABLE IF NOT EXISTS party_messages (
-    id BIGINT PRIMARY KEY,
-    party_id BIGINT NOT NULL,
-    from_phone TEXT NOT NULL,
-    from_name TEXT NOT NULL,
-    text TEXT NOT NULL,
-    time TEXT NOT NULL
-  )
-`);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS party_candidates (
+        party_id BIGINT PRIMARY KEY,
+        phone TEXT NOT NULL,
+        name TEXT NOT NULL
+      )
+    `);
 
-await pool.query(`
-  CREATE TABLE IF NOT EXISTS party_candidates (
-    party_id BIGINT PRIMARY KEY,
-    phone TEXT NOT NULL,
-    name TEXT NOT NULL
-  )
-`);
-
-await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS has_created_party BOOLEAN DEFAULT false`);
-
-console.log('✅ Таблицы готовы');
+    console.log('✅ Таблицы готовы');
   } catch (err) {
     console.error('❌ Ошибка таблиц:', err.stack || err.message);
   }
@@ -406,373 +395,64 @@ app.get('/api/users', async (req, res) => {
 app.post('/api/users', async (req, res) => {
   try {
     const u = req.body;
+
+    // ═══ АВТОПОНИЖЕНИЕ ПМ → ЖИ при ауре < 9800 (п. 2.5) ═══
+    if (u.status === 'ПМ' && (u.aura || 0) < 9800) {
+      u.status = 'ЖИ';
+    }
+
     await pool.query(
-      `INSERT INTO users (phone, login, password, first_name, last_name, code, paradox, tripcode, status, aura, tonki, avatar, has_pension, has_insurance, insurance_until, is_banned, ban_reason, ban_type, stamp_until)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+      `INSERT INTO users (phone, login, password, first_name, last_name, code, paradox, tripcode, status, aura, tonki, avatar, has_pension, has_insurance, insurance_until, is_banned, ban_reason, ban_type, stamp_until, has_created_party)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
        ON CONFLICT (phone) DO UPDATE SET
          login=$2, password=$3, first_name=$4, last_name=$5, code=$6,
          paradox=$7, tripcode=$8, status=$9, aura=$10, tonki=$11, avatar=$12,
          has_pension=$13, has_insurance=$14, insurance_until=$15,
-         is_banned=$16, ban_reason=$17, ban_type=$18, stamp_until=$19`,
+         is_banned=$16, ban_reason=$17, ban_type=$18, stamp_until=$19,
+         has_created_party=$20`,
       [u.phone, u.login, u.password, u.firstName, u.lastName, u.code, u.paradox,
        u.tripcode, u.status, u.aura, u.tonki, u.avatar,
        u.hasPension || false, u.hasInsurance || false, u.insuranceUntil || null,
-       u.isBanned || false, u.banReason || null, u.banType || null, u.stampUntil || null]
+       u.isBanned || false, u.banReason || null, u.banType || null, u.stampUntil || null,
+       u.hasCreatedParty || false]
     );
     res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/users/bonus_aura', async (req, res) => {
+  try {
+    const { phone, delta, reason, giverName } = req.body;
+    if (!phone || !delta) return res.status(400).json({ error: 'Bad params' });
+
+    const uRes = await pool.query('SELECT * FROM users WHERE phone=$1', [phone]);
+    if (uRes.rows.length === 0) return res.status(404).json({ error: 'User not found' });
+    const u = uRes.rows[0];
+
+    if (u.status === 'ПР') return res.status(400).json({ error: 'ПР не получает ауру' });
+
+    const newAura = (u.aura || 0) + delta;
+
+    await pool.query('UPDATE users SET aura=$1 WHERE phone=$2', [newAura, phone]);
+    await pool.query(
+      `INSERT INTO aura_history (id, phone, delta, reason, date)
+       VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO NOTHING`,
+      [
+        Date.now() + Math.floor(Math.random() * 1000),
+        phone,
+        delta,
+        reason || 'Награда',
+        new Date().toLocaleString('ru-RU')
+      ]
+    );
+
+    res.json({ ok: true, newAura });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.delete('/api/users/:phone', async (req, res) => {
   try {
     await pool.query('DELETE FROM users WHERE phone=$1', [req.params.phone]);
-    res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// ═══════════════════════════════════════════════════════
-// ПАРТИИ
-// ═══════════════════════════════════════════════════════
-
-// Получить все партии (с участниками и кандидатами)
-app.get('/api/parties', async (req, res) => {
-  try {
-    const partiesRes = await pool.query('SELECT * FROM parties ORDER BY id ASC');
-    const parties = [];
-    for (const p of partiesRes.rows) {
-      const membersRes = await pool.query(
-        'SELECT * FROM party_members WHERE party_id=$1 ORDER BY joined_at ASC',
-        [p.id]
-      );
-      const candRes = await pool.query(
-        'SELECT * FROM party_candidates WHERE party_id=$1',
-        [p.id]
-      );
-      parties.push({
-        id: p.id,
-        name: p.name,
-        leaderPhone: p.leader_phone,
-        leaderName: p.leader_name,
-        avatar: p.avatar,
-        createdAt: p.created_at,
-        members: membersRes.rows.map(m => ({
-          phone: m.phone,
-          name: m.name,
-          joinedAt: m.joined_at,
-        })),
-        candidate: candRes.rows.length > 0 ? {
-          phone: candRes.rows[0].phone,
-          name: candRes.rows[0].name,
-        } : null,
-      });
-    }
-    res.json(parties);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// Создать партию
-app.post('/api/parties', async (req, res) => {
-  try {
-    const { userPhone, userName, name } = req.body;
-    if (!userPhone || !name) return res.status(400).json({ error: 'Bad params' });
-
-    const trimmed = name.trim();
-    if (trimmed.length < 2) return res.status(400).json({ error: 'Название минимум 2 символа' });
-    if (trimmed.length > 40) return res.status(400).json({ error: 'Название максимум 40 символов' });
-
-    // Проверка: юзер уже создавал партию?
-    const uRes = await pool.query('SELECT has_created_party FROM users WHERE phone=$1', [userPhone]);
-    if (uRes.rows.length === 0) return res.status(404).json({ error: 'User not found' });
-    if (uRes.rows[0].has_created_party) {
-      return res.status(400).json({ error: 'Ты уже создавал партию. Можно только 1 раз.' });
-    }
-
-    // Максимум 3 партии
-    const cntRes = await pool.query('SELECT COUNT(*) FROM parties');
-    if (parseInt(cntRes.rows[0].count) >= 3) {
-      return res.status(400).json({ error: 'Максимум 3 партии в ПФ' });
-    }
-
-    // Название занято?
-    const dupRes = await pool.query('SELECT id FROM parties WHERE LOWER(name)=LOWER($1)', [trimmed]);
-    if (dupRes.rows.length > 0) return res.status(400).json({ error: 'Такое название уже занято' });
-
-    // Юзер не в партии?
-    const inPartyRes = await pool.query('SELECT party_id FROM party_members WHERE phone=$1', [userPhone]);
-    if (inPartyRes.rows.length > 0) return res.status(400).json({ error: 'Ты уже в партии' });
-
-    const id = Date.now();
-    const now = new Date().toISOString();
-
-    await pool.query(
-      `INSERT INTO parties (id, name, leader_phone, leader_name, created_at)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [id, trimmed, userPhone, userName, now]
-    );
-
-    await pool.query(
-      `INSERT INTO party_members (party_id, phone, name, joined_at)
-       VALUES ($1, $2, $3, $4)`,
-      [id, userPhone, userName, now]
-    );
-
-    await pool.query('UPDATE users SET has_created_party=true WHERE phone=$1', [userPhone]);
-
-    res.json({ ok: true, partyId: id });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// Переименовать партию
-app.post('/api/parties/:id/rename', async (req, res) => {
-  try {
-    const { userPhone, name } = req.body;
-    const trimmed = (name || '').trim();
-    if (trimmed.length < 2) return res.status(400).json({ error: 'Минимум 2 символа' });
-    if (trimmed.length > 40) return res.status(400).json({ error: 'Максимум 40 символов' });
-
-    const pRes = await pool.query('SELECT * FROM parties WHERE id=$1', [req.params.id]);
-    if (pRes.rows.length === 0) return res.status(404).json({ error: 'Not found' });
-    if (pRes.rows[0].leader_phone !== userPhone) return res.status(403).json({ error: 'Ты не глава' });
-
-    const dupRes = await pool.query(
-      'SELECT id FROM parties WHERE LOWER(name)=LOWER($1) AND id<>$2',
-      [trimmed, req.params.id]
-    );
-    if (dupRes.rows.length > 0) return res.status(400).json({ error: 'Такое название занято' });
-
-    await pool.query('UPDATE parties SET name=$1 WHERE id=$2', [trimmed, req.params.id]);
-    res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// Сменить аватарку партии
-app.post('/api/parties/:id/avatar', async (req, res) => {
-  try {
-    const { userPhone, avatar } = req.body;
-    const pRes = await pool.query('SELECT * FROM parties WHERE id=$1', [req.params.id]);
-    if (pRes.rows.length === 0) return res.status(404).json({ error: 'Not found' });
-    if (pRes.rows[0].leader_phone !== userPhone) return res.status(403).json({ error: 'Ты не глава' });
-
-    await pool.query('UPDATE parties SET avatar=$1 WHERE id=$2', [avatar || null, req.params.id]);
-    res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// Удалить партию (глава или ПР)
-app.delete('/api/parties/:id', async (req, res) => {
-  try {
-    const { userPhone } = req.body;
-    const pRes = await pool.query('SELECT * FROM parties WHERE id=$1', [req.params.id]);
-    if (pRes.rows.length === 0) return res.status(404).json({ error: 'Not found' });
-
-    const uRes = await pool.query('SELECT status FROM users WHERE phone=$1', [userPhone]);
-    const isPR = uRes.rows.length > 0 && uRes.rows[0].status === 'ПР';
-    const isLeader = pRes.rows[0].leader_phone === userPhone;
-
-    if (!isPR && !isLeader) return res.status(403).json({ error: 'Нет прав' });
-
-    await pool.query('DELETE FROM party_messages WHERE party_id=$1', [req.params.id]);
-    await pool.query('DELETE FROM party_candidates WHERE party_id=$1', [req.params.id]);
-    await pool.query('DELETE FROM party_requests WHERE party_id=$1', [req.params.id]);
-    await pool.query('DELETE FROM party_members WHERE party_id=$1', [req.params.id]);
-    await pool.query('DELETE FROM parties WHERE id=$1', [req.params.id]);
-
-    res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// Заявка на вступление
-app.post('/api/parties/:id/join', async (req, res) => {
-  try {
-    const { userPhone, userName } = req.body;
-    const pRes = await pool.query('SELECT * FROM parties WHERE id=$1', [req.params.id]);
-    if (pRes.rows.length === 0) return res.status(404).json({ error: 'Not found' });
-
-    const membersRes = await pool.query('SELECT COUNT(*) FROM party_members WHERE party_id=$1', [req.params.id]);
-    if (parseInt(membersRes.rows[0].count) >= 3) {
-      return res.status(400).json({ error: 'Партия заполнена' });
-    }
-
-    const inPartyRes = await pool.query('SELECT party_id FROM party_members WHERE phone=$1', [userPhone]);
-    if (inPartyRes.rows.length > 0) return res.status(400).json({ error: 'Ты уже в партии' });
-
-    const dupReq = await pool.query(
-      `SELECT id FROM party_requests WHERE party_id=$1 AND user_phone=$2 AND status='pending'`,
-      [req.params.id, userPhone]
-    );
-    if (dupReq.rows.length > 0) return res.status(400).json({ error: 'Заявка уже отправлена' });
-
-    await pool.query(
-      `INSERT INTO party_requests (id, party_id, user_phone, user_name, status, created_at)
-       VALUES ($1, $2, $3, $4, 'pending', $5)`,
-      [Date.now(), req.params.id, userPhone, userName, new Date().toISOString()]
-    );
-
-    res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// Получить заявки партии (только глава)
-app.get('/api/parties/:id/requests', async (req, res) => {
-  try {
-    const { userPhone } = req.query;
-    const pRes = await pool.query('SELECT * FROM parties WHERE id=$1', [req.params.id]);
-    if (pRes.rows.length === 0) return res.status(404).json({ error: 'Not found' });
-    if (pRes.rows[0].leader_phone !== userPhone) return res.status(403).json({ error: 'Не глава' });
-
-    const r = await pool.query(
-      `SELECT * FROM party_requests WHERE party_id=$1 AND status='pending' ORDER BY id ASC`,
-      [req.params.id]
-    );
-    res.json(r.rows.map(x => ({
-      id: x.id, partyId: x.party_id, userPhone: x.user_phone,
-      userName: x.user_name, status: x.status, createdAt: x.created_at,
-    })));
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// Принять/отклонить заявку
-app.post('/api/party_requests/:id/resolve', async (req, res) => {
-  try {
-    const { status, userPhone } = req.body;
-    if (!['approved', 'rejected'].includes(status)) return res.status(400).json({ error: 'Bad status' });
-
-    const rRes = await pool.query('SELECT * FROM party_requests WHERE id=$1', [req.params.id]);
-    if (rRes.rows.length === 0) return res.status(404).json({ error: 'Not found' });
-    const request = rRes.rows[0];
-
-    const pRes = await pool.query('SELECT * FROM parties WHERE id=$1', [request.party_id]);
-    if (pRes.rows.length === 0) return res.status(404).json({ error: 'Party not found' });
-    if (pRes.rows[0].leader_phone !== userPhone) return res.status(403).json({ error: 'Не глава' });
-
-    await pool.query(
-      `UPDATE party_requests SET status=$1, resolved_at=$2 WHERE id=$3`,
-      [status, new Date().toISOString(), req.params.id]
-    );
-
-    if (status === 'approved') {
-      const cntRes = await pool.query('SELECT COUNT(*) FROM party_members WHERE party_id=$1', [request.party_id]);
-      if (parseInt(cntRes.rows[0].count) >= 3) {
-        return res.status(400).json({ error: 'Партия уже заполнена' });
-      }
-      await pool.query(
-        `INSERT INTO party_members (party_id, phone, name, joined_at)
-         VALUES ($1, $2, $3, $4)
-         ON CONFLICT DO NOTHING`,
-        [request.party_id, request.user_phone, request.user_name, new Date().toISOString()]
-      );
-    }
-
-    res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// Убрать участника (глава)
-app.delete('/api/parties/:id/members/:phone', async (req, res) => {
-  try {
-    const { userPhone } = req.body;
-    const pRes = await pool.query('SELECT * FROM parties WHERE id=$1', [req.params.id]);
-    if (pRes.rows.length === 0) return res.status(404).json({ error: 'Not found' });
-    if (pRes.rows[0].leader_phone !== userPhone) return res.status(403).json({ error: 'Не глава' });
-    if (req.params.phone === userPhone) return res.status(400).json({ error: 'Себя нельзя убрать' });
-
-    await pool.query(
-      'DELETE FROM party_members WHERE party_id=$1 AND phone=$2',
-      [req.params.id, req.params.phone]
-    );
-    await pool.query(
-      'DELETE FROM party_candidates WHERE party_id=$1 AND phone=$2',
-      [req.params.id, req.params.phone]
-    );
-
-    res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// Выйти из партии (участник, не глава)
-app.post('/api/parties/:id/leave', async (req, res) => {
-  try {
-    const { userPhone } = req.body;
-    const pRes = await pool.query('SELECT * FROM parties WHERE id=$1', [req.params.id]);
-    if (pRes.rows.length === 0) return res.status(404).json({ error: 'Not found' });
-    if (pRes.rows[0].leader_phone === userPhone) {
-      return res.status(400).json({ error: 'Глава не может выйти. Удали партию.' });
-    }
-
-    await pool.query(
-      'DELETE FROM party_members WHERE party_id=$1 AND phone=$2',
-      [req.params.id, userPhone]
-    );
-    await pool.query(
-      'DELETE FROM party_candidates WHERE party_id=$1 AND phone=$2',
-      [req.params.id, userPhone]
-    );
-
-    res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// Назначить кандидата (глава)
-app.post('/api/parties/:id/candidate', async (req, res) => {
-  try {
-    const { userPhone, candidatePhone, candidateName } = req.body;
-    const pRes = await pool.query('SELECT * FROM parties WHERE id=$1', [req.params.id]);
-    if (pRes.rows.length === 0) return res.status(404).json({ error: 'Not found' });
-    if (pRes.rows[0].leader_phone !== userPhone) return res.status(403).json({ error: 'Не глава' });
-
-    const memRes = await pool.query(
-      'SELECT * FROM party_members WHERE party_id=$1 AND phone=$2',
-      [req.params.id, candidatePhone]
-    );
-    if (memRes.rows.length === 0) return res.status(400).json({ error: 'Этот ЖИ не в партии' });
-
-    await pool.query(
-      `INSERT INTO party_candidates (party_id, phone, name)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (party_id) DO UPDATE SET phone=$2, name=$3`,
-      [req.params.id, candidatePhone, candidateName]
-    );
-
-    res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// Снять кандидата (глава)
-app.delete('/api/parties/:id/candidate', async (req, res) => {
-  try {
-    const { userPhone } = req.body;
-    const pRes = await pool.query('SELECT * FROM parties WHERE id=$1', [req.params.id]);
-    if (pRes.rows.length === 0) return res.status(404).json({ error: 'Not found' });
-    if (pRes.rows[0].leader_phone !== userPhone) return res.status(403).json({ error: 'Не глава' });
-
-    await pool.query('DELETE FROM party_candidates WHERE party_id=$1', [req.params.id]);
-    res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// Сообщения чата партии
-app.get('/api/party_messages/:partyId', async (req, res) => {
-  try {
-    const r = await pool.query(
-      'SELECT * FROM party_messages WHERE party_id=$1 ORDER BY id ASC LIMIT 200',
-      [req.params.partyId]
-    );
-    res.json(r.rows.map(m => ({
-      id: m.id, partyId: m.party_id, from: m.from_phone,
-      fromName: m.from_name, text: m.text, time: m.time,
-    })));
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.post('/api/party_messages', async (req, res) => {
-  try {
-    const m = req.body;
-    await pool.query(
-      `INSERT INTO party_messages (id, party_id, from_phone, from_name, text, time)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       ON CONFLICT (id) DO NOTHING`,
-      [m.id, m.partyId, m.from, m.fromName, m.text || '', m.time]
-    );
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -1164,8 +844,8 @@ app.post('/api/casino/spin', async (req, res) => {
       const dailyRes = await pool.query('SELECT * FROM casino_daily WHERE phone=$1', [phone]);
       if (dailyRes.rows.length > 0) {
         const d = dailyRes.rows[0];
-        if (d.last_date === today && d.count >= 10) {
-          return res.status(403).json({ error: 'Лимит 10 игр в день исчерпан' });
+        if (d.last_date === today && d.count >= 15) {
+          return res.status(403).json({ error: 'Лимит 15 игр в день исчерпан' });
         }
       }
     }
@@ -1209,32 +889,31 @@ app.post('/api/casino/spin', async (req, res) => {
     else if (plumCount === 1) { winAmount = Math.floor(bet * 1.2); prizeType = 'one_plum'; }
     else { winAmount = 0; prizeType = 'lose'; }
 
-const newTonki = user.tonki - bet + winAmount;
+    const newTonki = user.tonki - bet + winAmount;
 
-let auraBonus = 0;
-if (prizeType === 'jackpot_banana') {
-  auraBonus = 1000;
-}
+    // ═══ ДЖЕКПОТ: +1000 ауры ═══
+    let auraBonus = 0;
+    if (prizeType === 'jackpot_banana') auraBonus = 1000;
 
-if (auraBonus > 0) {
-  await pool.query(
-    'UPDATE users SET tonki=$1, aura = COALESCE(aura, 0) + $2 WHERE phone=$3',
-    [newTonki, auraBonus, phone]
-  );
-  await pool.query(
-    `INSERT INTO aura_history (id, phone, delta, reason, date)
-     VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO NOTHING`,
-    [
-      Date.now() + Math.floor(Math.random() * 1000),
-      phone,
-      auraBonus,
-      'Джекпот 3 банана в казино',
-      new Date().toLocaleString('ru-RU')
-    ]
-  );
-} else {
-  await pool.query('UPDATE users SET tonki=$1 WHERE phone=$2', [newTonki, phone]);
-}
+    if (auraBonus > 0) {
+      await pool.query(
+        'UPDATE users SET tonki=$1, aura = COALESCE(aura, 0) + $2 WHERE phone=$3',
+        [newTonki, auraBonus, phone]
+      );
+      await pool.query(
+        `INSERT INTO aura_history (id, phone, delta, reason, date)
+         VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO NOTHING`,
+        [
+          Date.now() + Math.floor(Math.random() * 1000),
+          phone,
+          auraBonus,
+          'Джекпот 3 банана в казино',
+          new Date().toLocaleString('ru-RU')
+        ]
+      );
+    } else {
+      await pool.query('UPDATE users SET tonki=$1 WHERE phone=$2', [newTonki, phone]);
+    }
 
     let gamesLeft = null;
     if (!isPR) {
@@ -1247,7 +926,7 @@ if (auraBonus > 0) {
          ON CONFLICT (phone) DO UPDATE SET last_date=$2, count=$3`,
         [phone, today, newCount]
       );
-      gamesLeft = 10 - newCount;
+      gamesLeft = 15 - newCount;
     }
 
     await pool.query(
@@ -1256,12 +935,12 @@ if (auraBonus > 0) {
       [Date.now(), phone, name || 'ЖИ', bet, winAmount, reels.join(''), new Date().toLocaleString('ru-RU')]
     );
 
-res.json({
-  ok: true, reels, bet, winAmount,
-  netWin: winAmount - bet, prizeType,
-  newTonki, oldTonki: user.tonki,
-  gamesLeft, isPR, auraBonus,
-});
+    res.json({
+      ok: true, reels, bet, winAmount,
+      netWin: winAmount - bet, prizeType,
+      newTonki, oldTonki: user.tonki,
+      gamesLeft, isPR, auraBonus,
+    });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -1278,7 +957,7 @@ app.get('/api/casino/daily/:phone', async (req, res) => {
     const daily = await pool.query('SELECT * FROM casino_daily WHERE phone=$1', [req.params.phone]);
     const perm = await pool.query('SELECT * FROM casino_permission WHERE phone=$1', [req.params.phone]);
     const count = (daily.rows[0]?.last_date === today) ? daily.rows[0].count : 0;
-    res.json({ count, left: Math.max(0, 10 - count), hasPermission: perm.rows.length > 0 });
+    res.json({ count, left: Math.max(0, 15 - count), hasPermission: perm.rows.length > 0 });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -1306,36 +985,6 @@ app.get('/api/casino/permissions', async (req, res) => {
   try {
     const r = await pool.query('SELECT * FROM casino_permission');
     res.json(r.rows.map(x => ({ phone: x.phone, grantedAt: x.granted_at, grantedBy: x.granted_by })));
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.post('/api/users/bonus_aura', async (req, res) => {
-  try {
-    const { phone, delta, reason, giverName } = req.body;
-    if (!phone || !delta) return res.status(400).json({ error: 'Bad params' });
-
-    const uRes = await pool.query('SELECT * FROM users WHERE phone=$1', [phone]);
-    if (uRes.rows.length === 0) return res.status(404).json({ error: 'User not found' });
-    const u = uRes.rows[0];
-
-    if (u.status === 'ПР') return res.status(400).json({ error: 'ПР не получает ауру' });
-
-    const newAura = (u.aura || 0) + delta;
-
-    await pool.query('UPDATE users SET aura=$1 WHERE phone=$2', [newAura, phone]);
-    await pool.query(
-      `INSERT INTO aura_history (id, phone, delta, reason, date)
-       VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO NOTHING`,
-      [
-        Date.now() + Math.floor(Math.random() * 1000),
-        phone,
-        delta,
-        reason || 'Награда',
-        new Date().toLocaleString('ru-RU')
-      ]
-    );
-
-    res.json({ ok: true, newAura });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -1424,61 +1073,38 @@ app.post('/api/elections/finish', async (req, res) => {
     const winner = cands.rows[0];
     const winnerPhone = winner.phone;
     const winnerName = winner.name;
-await pool.query('UPDATE users SET status=$1 WHERE phone=$2', ['ПВ', winnerPhone]);
-await pool.query('UPDATE users SET status=$1 WHERE status=$2 AND phone<>$3', ['ЖИ', 'ПВ', winnerPhone]);
-await pool.query('UPDATE users SET tonki = tonki + 100 WHERE phone=$1', [winnerPhone]);
 
-// ═══ НАГРАДА: +1000 ауры всем участникам партии победителя ═══
-let partyMembers = [];
-try {
-  const memberRes = await pool.query(
-    'SELECT phone, name FROM party_members WHERE party_id = (SELECT id FROM parties WHERE leader_phone=$1 OR id IN (SELECT party_id FROM party_members WHERE phone=$1) LIMIT 1)',
-    [winnerPhone]
-  );
-  if (memberRes.rows.length === 0) {
-    // fallback: партия по кандидату
-    const cRes = await pool.query(
-      'SELECT pm.phone, pm.name FROM party_members pm JOIN party_candidates pc ON pc.party_id = pm.party_id WHERE pc.phone=$1',
-      [winnerPhone]
-    );
-    partyMembers = cRes.rows;
-  } else {
-    partyMembers = memberRes.rows;
-  }
-} catch (e) { console.error('party bonus:', e.message); }
+    await pool.query('UPDATE users SET status=$1 WHERE phone=$2', ['ПВ', winnerPhone]);
+    await pool.query('UPDATE users SET status=$1 WHERE status=$2 AND phone<>$3', ['ЖИ', 'ПВ', winnerPhone]);
+    await pool.query('UPDATE users SET tonki = tonki + 100 WHERE phone=$1', [winnerPhone]);
 
-for (const m of partyMembers) {
-  if (m.phone === winnerPhone) continue; // победителю тоже дадим
-  await pool.query('UPDATE users SET aura = COALESCE(aura, 0) + 1000 WHERE phone=$1', [m.phone]);
-  await pool.query(
-    `INSERT INTO aura_history (id, phone, delta, reason, date)
-     VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO NOTHING`,
-    [
-      Date.now() + Math.floor(Math.random() * 10000),
-      m.phone,
-      1000,
-      'Победная партия на выборах ПВ',
-      new Date().toLocaleString('ru-RU')
-    ]
-  );
-}
+    // ═══ НАГРАДА: +1000 ауры всем участникам партии победителя ═══
+    let partyMembers = [];
+    try {
+      const cRes = await pool.query(
+        'SELECT pm.phone, pm.name FROM party_members pm JOIN party_candidates pc ON pc.party_id = pm.party_id WHERE pc.phone=$1',
+        [winnerPhone]
+      );
+      partyMembers = cRes.rows;
+    } catch (e) { console.error('party bonus:', e.message); }
 
-// Победителю тоже +1000 (он тоже в партии)
-await pool.query('UPDATE users SET aura = COALESCE(aura, 0) + 1000 WHERE phone=$1', [winnerPhone]);
-await pool.query(
-  `INSERT INTO aura_history (id, phone, delta, reason, date)
-   VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO NOTHING`,
-  [
-    Date.now() + Math.floor(Math.random() * 10000),
-    winnerPhone,
-    1000,
-    'Победная партия на выборах ПВ (ты — кандидат)',
-    new Date().toLocaleString('ru-RU')
-  ]
-);
+    for (const m of partyMembers) {
+      await pool.query('UPDATE users SET aura = COALESCE(aura, 0) + 1000 WHERE phone=$1', [m.phone]);
+      await pool.query(
+        `INSERT INTO aura_history (id, phone, delta, reason, date)
+         VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO NOTHING`,
+        [
+          Date.now() + Math.floor(Math.random() * 100000),
+          m.phone,
+          1000,
+          m.phone === winnerPhone ? 'Победная партия на выборах ПВ (ты — кандидат)' : 'Победная партия на выборах ПВ',
+          new Date().toLocaleString('ru-RU')
+        ]
+      );
+    }
 
-await pool.query('UPDATE elections SET finished=true, winner_phone=$1, winner_name=$2 WHERE id=1', [winnerPhone, winnerName]);
-res.json({ ok: true, winnerPhone, winnerName, partyBonus: partyMembers.length + 1 });
+    await pool.query('UPDATE elections SET finished=true, winner_phone=$1, winner_name=$2 WHERE id=1', [winnerPhone, winnerName]);
+    res.json({ ok: true, winnerPhone, winnerName, partyBonus: partyMembers.length });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -1879,6 +1505,47 @@ app.delete('/api/appeals/:id', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+app.post('/api/appeals/:id/resolve', async (req, res) => {
+  try {
+    const { status, prComment, resolvedBy } = req.body;
+    const appealRes = await pool.query('SELECT * FROM appeals WHERE id=$1', [req.params.id]);
+    if (appealRes.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    const appeal = appealRes.rows[0];
+    await pool.query(
+      `UPDATE appeals SET status=$1, pr_comment=$2, resolved_at=$3, resolved_by=$4 WHERE id=$5`,
+      [status, prComment || null, new Date().toISOString(), resolvedBy || null, req.params.id]
+    );
+    if (status === 'approved') {
+      await pool.query('DELETE FROM fines WHERE id=$1', [appeal.fine_id]);
+    }
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ═══════════════════════════════════════════════════════
+// ЗАЯВКИ НА ДОКУМЕНТЫ
+// ═══════════════════════════════════════════════════════
+app.get('/api/doc_requests', async (req, res) => {
+  try {
+    const r = await pool.query('SELECT * FROM doc_requests ORDER BY id DESC');
+    res.json(r.rows.map(a => ({ id: a.id, userPhone: a.user_phone, userName: a.user_name, docType: a.doc_type, status: a.status, prComment: a.pr_comment, createdAt: a.created_at, resolvedAt: a.resolved_at, resolvedBy: a.resolved_by })));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/doc_requests', async (req, res) => {
+  try {
+    const a = req.body;
+    await pool.query(
+      `INSERT INTO doc_requests (id, user_phone, user_name, doc_type, status, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6)
+       ON CONFLICT (id) DO UPDATE SET status=$5, pr_comment=$7, resolved_at=$8, resolved_by=$9`,
+      [a.id, a.userPhone, a.userName, a.docType, a.status || 'pending', a.createdAt,
+       a.prComment || null, a.resolvedAt || null, a.resolvedBy || null]
+    );
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.post('/api/doc_requests/:id/resolve', async (req, res) => {
   try {
     const { status, prComment, resolvedBy } = req.body;
@@ -1905,9 +1572,340 @@ app.post('/api/doc_requests/:id/resolve', async (req, res) => {
           [request.user_phone, new Date().toISOString(), resolvedBy || 'ПР']
         );
       } else if (request.doc_type === 'pm_status') {
+        // ═══ ПМ или ПЗ ═══
+        // ПР ставит статус ВРУЧНУЮ через 👥 Данные ЖИ → карточка → 🏷️ Статус.
       }
     }
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
 
+// ═══════════════════════════════════════════════════════
+// ПАРТИИ
+// ═══════════════════════════════════════════════════════
+
+app.get('/api/parties', async (req, res) => {
+  try {
+    const partiesRes = await pool.query('SELECT * FROM parties ORDER BY id ASC');
+    const parties = [];
+    for (const p of partiesRes.rows) {
+      const membersRes = await pool.query(
+        'SELECT * FROM party_members WHERE party_id=$1 ORDER BY joined_at ASC',
+        [p.id]
+      );
+      const candRes = await pool.query(
+        'SELECT * FROM party_candidates WHERE party_id=$1',
+        [p.id]
+      );
+      parties.push({
+        id: p.id,
+        name: p.name,
+        leaderPhone: p.leader_phone,
+        leaderName: p.leader_name,
+        avatar: p.avatar,
+        createdAt: p.created_at,
+        members: membersRes.rows.map(m => ({
+          phone: m.phone,
+          name: m.name,
+          joinedAt: m.joined_at,
+        })),
+        candidate: candRes.rows.length > 0 ? {
+          phone: candRes.rows[0].phone,
+          name: candRes.rows[0].name,
+        } : null,
+      });
+    }
+    res.json(parties);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/parties', async (req, res) => {
+  try {
+    const { userPhone, userName, name } = req.body;
+    if (!userPhone || !name) return res.status(400).json({ error: 'Bad params' });
+
+    const trimmed = name.trim();
+    if (trimmed.length < 2) return res.status(400).json({ error: 'Название минимум 2 символа' });
+    if (trimmed.length > 40) return res.status(400).json({ error: 'Название максимум 40 символов' });
+
+    const uRes = await pool.query('SELECT has_created_party FROM users WHERE phone=$1', [userPhone]);
+    if (uRes.rows.length === 0) return res.status(404).json({ error: 'User not found' });
+    if (uRes.rows[0].has_created_party) {
+      return res.status(400).json({ error: 'Ты уже создавал партию. Можно только 1 раз.' });
+    }
+
+    const cntRes = await pool.query('SELECT COUNT(*) FROM parties');
+    if (parseInt(cntRes.rows[0].count) >= 3) {
+      return res.status(400).json({ error: 'Максимум 3 партии в ПФ' });
+    }
+
+    const dupRes = await pool.query('SELECT id FROM parties WHERE LOWER(name)=LOWER($1)', [trimmed]);
+    if (dupRes.rows.length > 0) return res.status(400).json({ error: 'Такое название уже занято' });
+
+    const inPartyRes = await pool.query('SELECT party_id FROM party_members WHERE phone=$1', [userPhone]);
+    if (inPartyRes.rows.length > 0) return res.status(400).json({ error: 'Ты уже в партии' });
+
+    const id = Date.now();
+    const now = new Date().toISOString();
+
+    await pool.query(
+      `INSERT INTO parties (id, name, leader_phone, leader_name, created_at)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [id, trimmed, userPhone, userName, now]
+    );
+
+    await pool.query(
+      `INSERT INTO party_members (party_id, phone, name, joined_at)
+       VALUES ($1, $2, $3, $4)`,
+      [id, userPhone, userName, now]
+    );
+
+    await pool.query('UPDATE users SET has_created_party=true WHERE phone=$1', [userPhone]);
+
+    res.json({ ok: true, partyId: id });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/parties/:id/rename', async (req, res) => {
+  try {
+    const { userPhone, name } = req.body;
+    const trimmed = (name || '').trim();
+    if (trimmed.length < 2) return res.status(400).json({ error: 'Минимум 2 символа' });
+    if (trimmed.length > 40) return res.status(400).json({ error: 'Максимум 40 символов' });
+
+    const pRes = await pool.query('SELECT * FROM parties WHERE id=$1', [req.params.id]);
+    if (pRes.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    if (pRes.rows[0].leader_phone !== userPhone) return res.status(403).json({ error: 'Ты не глава' });
+
+    const dupRes = await pool.query(
+      'SELECT id FROM parties WHERE LOWER(name)=LOWER($1) AND id<>$2',
+      [trimmed, req.params.id]
+    );
+    if (dupRes.rows.length > 0) return res.status(400).json({ error: 'Такое название занято' });
+
+    await pool.query('UPDATE parties SET name=$1 WHERE id=$2', [trimmed, req.params.id]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/parties/:id/avatar', async (req, res) => {
+  try {
+    const { userPhone, avatar } = req.body;
+    const pRes = await pool.query('SELECT * FROM parties WHERE id=$1', [req.params.id]);
+    if (pRes.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    if (pRes.rows[0].leader_phone !== userPhone) return res.status(403).json({ error: 'Ты не глава' });
+
+    await pool.query('UPDATE parties SET avatar=$1 WHERE id=$2', [avatar || null, req.params.id]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/parties/:id', async (req, res) => {
+  try {
+    const { userPhone } = req.body;
+    const pRes = await pool.query('SELECT * FROM parties WHERE id=$1', [req.params.id]);
+    if (pRes.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+
+    const uRes = await pool.query('SELECT status FROM users WHERE phone=$1', [userPhone]);
+    const isPR = uRes.rows.length > 0 && uRes.rows[0].status === 'ПР';
+    const isLeader = pRes.rows[0].leader_phone === userPhone;
+
+    if (!isPR && !isLeader) return res.status(403).json({ error: 'Нет прав' });
+
+    await pool.query('DELETE FROM party_messages WHERE party_id=$1', [req.params.id]);
+    await pool.query('DELETE FROM party_candidates WHERE party_id=$1', [req.params.id]);
+    await pool.query('DELETE FROM party_requests WHERE party_id=$1', [req.params.id]);
+    await pool.query('DELETE FROM party_members WHERE party_id=$1', [req.params.id]);
+    await pool.query('DELETE FROM parties WHERE id=$1', [req.params.id]);
+
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/parties/:id/join', async (req, res) => {
+  try {
+    const { userPhone, userName } = req.body;
+    const pRes = await pool.query('SELECT * FROM parties WHERE id=$1', [req.params.id]);
+    if (pRes.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+
+    const membersRes = await pool.query('SELECT COUNT(*) FROM party_members WHERE party_id=$1', [req.params.id]);
+    if (parseInt(membersRes.rows[0].count) >= 3) {
+      return res.status(400).json({ error: 'Партия заполнена' });
+    }
+
+    const inPartyRes = await pool.query('SELECT party_id FROM party_members WHERE phone=$1', [userPhone]);
+    if (inPartyRes.rows.length > 0) return res.status(400).json({ error: 'Ты уже в партии' });
+
+    const dupReq = await pool.query(
+      `SELECT id FROM party_requests WHERE party_id=$1 AND user_phone=$2 AND status='pending'`,
+      [req.params.id, userPhone]
+    );
+    if (dupReq.rows.length > 0) return res.status(400).json({ error: 'Заявка уже отправлена' });
+
+    await pool.query(
+      `INSERT INTO party_requests (id, party_id, user_phone, user_name, status, created_at)
+       VALUES ($1, $2, $3, $4, 'pending', $5)`,
+      [Date.now(), req.params.id, userPhone, userName, new Date().toISOString()]
+    );
+
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/parties/:id/requests', async (req, res) => {
+  try {
+    const { userPhone } = req.query;
+    const pRes = await pool.query('SELECT * FROM parties WHERE id=$1', [req.params.id]);
+    if (pRes.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    if (pRes.rows[0].leader_phone !== userPhone) return res.status(403).json({ error: 'Не глава' });
+
+    const r = await pool.query(
+      `SELECT * FROM party_requests WHERE party_id=$1 AND status='pending' ORDER BY id ASC`,
+      [req.params.id]
+    );
+    res.json(r.rows.map(x => ({
+      id: x.id, partyId: x.party_id, userPhone: x.user_phone,
+      userName: x.user_name, status: x.status, createdAt: x.created_at,
+    })));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/party_requests/:id/resolve', async (req, res) => {
+  try {
+    const { status, userPhone } = req.body;
+    if (!['approved', 'rejected'].includes(status)) return res.status(400).json({ error: 'Bad status' });
+
+    const rRes = await pool.query('SELECT * FROM party_requests WHERE id=$1', [req.params.id]);
+    if (rRes.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    const request = rRes.rows[0];
+
+    const pRes = await pool.query('SELECT * FROM parties WHERE id=$1', [request.party_id]);
+    if (pRes.rows.length === 0) return res.status(404).json({ error: 'Party not found' });
+    if (pRes.rows[0].leader_phone !== userPhone) return res.status(403).json({ error: 'Не глава' });
+
+    await pool.query(
+      `UPDATE party_requests SET status=$1, resolved_at=$2 WHERE id=$3`,
+      [status, new Date().toISOString(), req.params.id]
+    );
+
+    if (status === 'approved') {
+      const cntRes = await pool.query('SELECT COUNT(*) FROM party_members WHERE party_id=$1', [request.party_id]);
+      if (parseInt(cntRes.rows[0].count) >= 3) {
+        return res.status(400).json({ error: 'Партия уже заполнена' });
+      }
+      await pool.query(
+        `INSERT INTO party_members (party_id, phone, name, joined_at)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT DO NOTHING`,
+        [request.party_id, request.user_phone, request.user_name, new Date().toISOString()]
+      );
+    }
+
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/parties/:id/members/:phone', async (req, res) => {
+  try {
+    const { userPhone } = req.body;
+    const pRes = await pool.query('SELECT * FROM parties WHERE id=$1', [req.params.id]);
+    if (pRes.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    if (pRes.rows[0].leader_phone !== userPhone) return res.status(403).json({ error: 'Не глава' });
+    if (req.params.phone === userPhone) return res.status(400).json({ error: 'Себя нельзя убрать' });
+
+    await pool.query(
+      'DELETE FROM party_members WHERE party_id=$1 AND phone=$2',
+      [req.params.id, req.params.phone]
+    );
+    await pool.query(
+      'DELETE FROM party_candidates WHERE party_id=$1 AND phone=$2',
+      [req.params.id, req.params.phone]
+    );
+
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/parties/:id/leave', async (req, res) => {
+  try {
+    const { userPhone } = req.body;
+    const pRes = await pool.query('SELECT * FROM parties WHERE id=$1', [req.params.id]);
+    if (pRes.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    if (pRes.rows[0].leader_phone === userPhone) {
+      return res.status(400).json({ error: 'Глава не может выйти. Удали партию.' });
+    }
+
+    await pool.query(
+      'DELETE FROM party_members WHERE party_id=$1 AND phone=$2',
+      [req.params.id, userPhone]
+    );
+    await pool.query(
+      'DELETE FROM party_candidates WHERE party_id=$1 AND phone=$2',
+      [req.params.id, userPhone]
+    );
+
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/parties/:id/candidate', async (req, res) => {
+  try {
+    const { userPhone, candidatePhone, candidateName } = req.body;
+    const pRes = await pool.query('SELECT * FROM parties WHERE id=$1', [req.params.id]);
+    if (pRes.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    if (pRes.rows[0].leader_phone !== userPhone) return res.status(403).json({ error: 'Не глава' });
+
+    const memRes = await pool.query(
+      'SELECT * FROM party_members WHERE party_id=$1 AND phone=$2',
+      [req.params.id, candidatePhone]
+    );
+    if (memRes.rows.length === 0) return res.status(400).json({ error: 'Этот ЖИ не в партии' });
+
+    await pool.query(
+      `INSERT INTO party_candidates (party_id, phone, name)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (party_id) DO UPDATE SET phone=$2, name=$3`,
+      [req.params.id, candidatePhone, candidateName]
+    );
+
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/parties/:id/candidate', async (req, res) => {
+  try {
+    const { userPhone } = req.body;
+    const pRes = await pool.query('SELECT * FROM parties WHERE id=$1', [req.params.id]);
+    if (pRes.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    if (pRes.rows[0].leader_phone !== userPhone) return res.status(403).json({ error: 'Не глава' });
+
+    await pool.query('DELETE FROM party_candidates WHERE party_id=$1', [req.params.id]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/party_messages/:partyId', async (req, res) => {
+  try {
+    const r = await pool.query(
+      'SELECT * FROM party_messages WHERE party_id=$1 ORDER BY id ASC LIMIT 200',
+      [req.params.partyId]
+    );
+    res.json(r.rows.map(m => ({
+      id: m.id, partyId: m.party_id, from: m.from_phone,
+      fromName: m.from_name, text: m.text, time: m.time,
+    })));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/party_messages', async (req, res) => {
+  try {
+    const m = req.body;
+    await pool.query(
+      `INSERT INTO party_messages (id, party_id, from_phone, from_name, text, time)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (id) DO NOTHING`,
+      [m.id, m.partyId, m.from, m.fromName, m.text || '', m.time]
+    );
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
