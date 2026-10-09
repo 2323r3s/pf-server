@@ -1430,14 +1430,17 @@ app.post('/api/doc_requests/:id/resolve', async (req, res) => {
           [request.user_phone, new Date().toISOString(), resolvedBy || 'ПР']
         );
       } else if (request.doc_type === 'pm_status') {
-        // ═══ ПМ СТАТУС ═══
-        // 1. Проверяем ауру и тонки
+        // ═══ ПМ или ПЗ СТАТУС ═══
         const uRes = await pool.query('SELECT aura, tonki, status FROM users WHERE phone=$1', [request.user_phone]);
         if (uRes.rows.length > 0) {
           const u = uRes.rows[0];
-          if (u.aura >= 9999 && u.tonki >= 10 && u.status !== 'ПМ') {
-            // 2. Списываем 10 ₮ — они идут в казну (Банк ПФ)
-            await pool.query('UPDATE users SET status=$1, tonki=tonki-10 WHERE phone=$2', ['ПМ', request.user_phone]);
+          let newStatus = null;
+          if (u.aura >= 9999 && u.tonki >= 10) {
+            if (u.status === 'ЖИ') newStatus = 'ПМ';
+            else if (u.status === 'ЗМ') newStatus = 'ПЗ';
+          }
+          if (newStatus) {
+            await pool.query('UPDATE users SET status=$1, tonki=tonki-10 WHERE phone=$2', [newStatus, request.user_phone]);
             await pool.query('UPDATE bank_pf SET amount = amount + 10 WHERE id=1');
           }
         }
