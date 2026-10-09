@@ -458,6 +458,109 @@ app.delete('/api/users/:phone', async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════
+// СБРОС ПАРОЛЯ
+// ═══════════════════════════════════════════════════════
+
+// Проверка логина + телефона
+app.post('/api/password_reset/verify', async (req, res) => {
+  try {
+    const { login, phone } = req.body;
+    if (!login || !phone) return res.status(400).json({ error: 'Введи логин и телефон' });
+
+    const cleanLogin = login.trim().toLowerCase();
+    const cleanPhone = phone.trim();
+
+    const r = await pool.query(
+      'SELECT phone, login, first_name, last_name FROM users WHERE LOWER(login)=$1 AND phone=$2',
+      [cleanLogin, cleanPhone]
+    );
+
+    if (r.rows.length === 0) {
+      return res.status(404).json({ error: 'Логин и телефон не совпадают' });
+    }
+
+    const u = r.rows[0];
+    res.json({
+      ok: true,
+      userPhone: u.phone,
+      userName: `${u.first_name} ${u.last_name}`,
+      login: u.login,
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Сброс пароля
+app.post('/api/password_reset/commit', async (req, res) => {
+  try {
+    const { login, phone, newPassword } = req.body;
+    if (!login || !phone || !newPassword) {
+      return res.status(400).json({ error: 'Заполни все поля' });
+    }
+    if (newPassword.length < 8) {
+      return res.status(400).json({ error: 'Пароль минимум 8 символов' });
+    }
+
+    const cleanLogin = login.trim().toLowerCase();
+    const cleanPhone = phone.trim();
+
+    const r = await pool.query(
+      'SELECT * FROM users WHERE LOWER(login)=$1 AND phone=$2',
+      [cleanLogin, cleanPhone]
+    );
+    if (r.rows.length === 0) {
+      return res.status(404).json({ error: 'Логин и телефон не совпадают' });
+    }
+
+    const u = r.rows[0];
+
+    await pool.query('UPDATE users SET password=$1 WHERE phone=$2', [newPassword, u.phone]);
+
+    // Запись в журнал
+    await pool.query(
+      `INSERT INTO password_resets (id, user_phone, user_name, login, phone, date)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [
+        Date.now(),
+        u.phone,
+        `${u.first_name} ${u.last_name}`,
+        u.login,
+        u.phone,
+        new Date().toLocaleString('ru-RU')
+      ]
+    );
+
+    // Сообщение в общий чат от системы
+    await pool.query(
+      `INSERT INTO messages (id, from_phone, from_name, from_avatar, from_status, text, time, date)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [
+        Date.now() + 1,
+        'system',
+        '🔔 Система',
+        null,
+        'БОТ',
+        `${u.first_name} ${u.last_name} сбросил пароль`,
+        new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }),
+        new Date().toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })
+      ]
+    );
+
+    res.json({ ok: true, userPhone: u.phone, userName: `${u.first_name} ${u.last_name}` });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Журнал сбросов (только ПР)
+app.get('/api/password_resets', async (req, res) => {
+  try {
+    const r = await pool.query('SELECT * FROM password_resets ORDER BY id DESC LIMIT 100');
+    res.json(r.rows.map(x => ({
+      id: x.id, userPhone: x.user_phone, userName: x.user_name,
+      login: x.login, phone: x.phone, date: x.date,
+    })));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ═══════════════════════════════════════════════════════
 // ВЫСЕЛЕНИЕ / ШТАММ / ПРОЩЕНИЕ
 // ═══════════════════════════════════════════════════════
 app.post('/api/admin/ban', async (req, res) => {
