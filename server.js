@@ -1209,9 +1209,32 @@ app.post('/api/casino/spin', async (req, res) => {
     else if (plumCount === 1) { winAmount = Math.floor(bet * 1.2); prizeType = 'one_plum'; }
     else { winAmount = 0; prizeType = 'lose'; }
 
-    const newTonki = user.tonki - bet + winAmount;
+const newTonki = user.tonki - bet + winAmount;
 
-    await pool.query('UPDATE users SET tonki=$1 WHERE phone=$2', [newTonki, phone]);
+let auraBonus = 0;
+if (prizeType === 'jackpot_banana') {
+  auraBonus = 1000;
+}
+
+if (auraBonus > 0) {
+  await pool.query(
+    'UPDATE users SET tonki=$1, aura = COALESCE(aura, 0) + $2 WHERE phone=$3',
+    [newTonki, auraBonus, phone]
+  );
+  await pool.query(
+    `INSERT INTO aura_history (id, phone, delta, reason, date)
+     VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO NOTHING`,
+    [
+      Date.now() + Math.floor(Math.random() * 1000),
+      phone,
+      auraBonus,
+      'Джекпот 3 банана в казино',
+      new Date().toLocaleString('ru-RU')
+    ]
+  );
+} else {
+  await pool.query('UPDATE users SET tonki=$1 WHERE phone=$2', [newTonki, phone]);
+}
 
     let gamesLeft = null;
     if (!isPR) {
@@ -1233,12 +1256,12 @@ app.post('/api/casino/spin', async (req, res) => {
       [Date.now(), phone, name || 'ЖИ', bet, winAmount, reels.join(''), new Date().toLocaleString('ru-RU')]
     );
 
-    res.json({
-      ok: true, reels, bet, winAmount,
-      netWin: winAmount - bet, prizeType,
-      newTonki, oldTonki: user.tonki,
-      gamesLeft, isPR,
-    });
+res.json({
+  ok: true, reels, bet, winAmount,
+  netWin: winAmount - bet, prizeType,
+  newTonki, oldTonki: user.tonki,
+  gamesLeft, isPR, auraBonus,
+});
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -1283,6 +1306,36 @@ app.get('/api/casino/permissions', async (req, res) => {
   try {
     const r = await pool.query('SELECT * FROM casino_permission');
     res.json(r.rows.map(x => ({ phone: x.phone, grantedAt: x.granted_at, grantedBy: x.granted_by })));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/users/bonus_aura', async (req, res) => {
+  try {
+    const { phone, delta, reason, giverName } = req.body;
+    if (!phone || !delta) return res.status(400).json({ error: 'Bad params' });
+
+    const uRes = await pool.query('SELECT * FROM users WHERE phone=$1', [phone]);
+    if (uRes.rows.length === 0) return res.status(404).json({ error: 'User not found' });
+    const u = uRes.rows[0];
+
+    if (u.status === 'ПР') return res.status(400).json({ error: 'ПР не получает ауру' });
+
+    const newAura = (u.aura || 0) + delta;
+
+    await pool.query('UPDATE users SET aura=$1 WHERE phone=$2', [newAura, phone]);
+    await pool.query(
+      `INSERT INTO aura_history (id, phone, delta, reason, date)
+       VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO NOTHING`,
+      [
+        Date.now() + Math.floor(Math.random() * 1000),
+        phone,
+        delta,
+        reason || 'Награда',
+        new Date().toLocaleString('ru-RU')
+      ]
+    );
+
+    res.json({ ok: true, newAura });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -1371,11 +1424,61 @@ app.post('/api/elections/finish', async (req, res) => {
     const winner = cands.rows[0];
     const winnerPhone = winner.phone;
     const winnerName = winner.name;
-    await pool.query('UPDATE users SET status=$1 WHERE phone=$2', ['ПВ', winnerPhone]);
-    await pool.query('UPDATE users SET status=$1 WHERE status=$2 AND phone<>$3', ['ЖИ', 'ПВ', winnerPhone]);
-    await pool.query('UPDATE users SET tonki = tonki + 100 WHERE phone=$1', [winnerPhone]);
-    await pool.query('UPDATE elections SET finished=true, winner_phone=$1, winner_name=$2 WHERE id=1', [winnerPhone, winnerName]);
-    res.json({ ok: true, winnerPhone, winnerName });
+await pool.query('UPDATE users SET status=$1 WHERE phone=$2', ['ПВ', winnerPhone]);
+await pool.query('UPDATE users SET status=$1 WHERE status=$2 AND phone<>$3', ['ЖИ', 'ПВ', winnerPhone]);
+await pool.query('UPDATE users SET tonki = tonki + 100 WHERE phone=$1', [winnerPhone]);
+
+// ═══ НАГРАДА: +1000 ауры всем участникам партии победителя ═══
+let partyMembers = [];
+try {
+  const memberRes = await pool.query(
+    'SELECT phone, name FROM party_members WHERE party_id = (SELECT id FROM parties WHERE leader_phone=$1 OR id IN (SELECT party_id FROM party_members WHERE phone=$1) LIMIT 1)',
+    [winnerPhone]
+  );
+  if (memberRes.rows.length === 0) {
+    // fallback: партия по кандидату
+    const cRes = await pool.query(
+      'SELECT pm.phone, pm.name FROM party_members pm JOIN party_candidates pc ON pc.party_id = pm.party_id WHERE pc.phone=$1',
+      [winnerPhone]
+    );
+    partyMembers = cRes.rows;
+  } else {
+    partyMembers = memberRes.rows;
+  }
+} catch (e) { console.error('party bonus:', e.message); }
+
+for (const m of partyMembers) {
+  if (m.phone === winnerPhone) continue; // победителю тоже дадим
+  await pool.query('UPDATE users SET aura = COALESCE(aura, 0) + 1000 WHERE phone=$1', [m.phone]);
+  await pool.query(
+    `INSERT INTO aura_history (id, phone, delta, reason, date)
+     VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO NOTHING`,
+    [
+      Date.now() + Math.floor(Math.random() * 10000),
+      m.phone,
+      1000,
+      'Победная партия на выборах ПВ',
+      new Date().toLocaleString('ru-RU')
+    ]
+  );
+}
+
+// Победителю тоже +1000 (он тоже в партии)
+await pool.query('UPDATE users SET aura = COALESCE(aura, 0) + 1000 WHERE phone=$1', [winnerPhone]);
+await pool.query(
+  `INSERT INTO aura_history (id, phone, delta, reason, date)
+   VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO NOTHING`,
+  [
+    Date.now() + Math.floor(Math.random() * 10000),
+    winnerPhone,
+    1000,
+    'Победная партия на выборах ПВ (ты — кандидат)',
+    new Date().toLocaleString('ru-RU')
+  ]
+);
+
+await pool.query('UPDATE elections SET finished=true, winner_phone=$1, winner_name=$2 WHERE id=1', [winnerPhone, winnerName]);
+res.json({ ok: true, winnerPhone, winnerName, partyBonus: partyMembers.length + 1 });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
