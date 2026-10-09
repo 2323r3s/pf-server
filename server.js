@@ -1411,11 +1411,31 @@ app.post('/api/doc_requests/:id/resolve', async (req, res) => {
     if (reqRes.rows.length === 0) return res.status(404).json({ error: 'Not found' });
     const request = reqRes.rows[0];
 
+    // ═══ ПРОВЕРКИ ДЛЯ pm_status ДО обновления заявки ═══
+    if (status === 'approved' && request.doc_type === 'pm_status') {
+      const uRes = await pool.query('SELECT aura, tonki, status FROM users WHERE phone=$1', [request.user_phone]);
+      if (uRes.rows.length === 0) {
+        return res.status(404).json({ error: 'Пользователь не найден' });
+      }
+      const u = uRes.rows[0];
+      if (u.aura < 9999) {
+        return res.status(400).json({ error: `Недостаточно ауры: ${u.aura}/9999` });
+      }
+      if (u.tonki < 10) {
+        return res.status(400).json({ error: `Недостаточно тонков: ${u.tonki}/10` });
+      }
+      if (u.status !== 'ЖИ' && u.status !== 'ЗМ') {
+        return res.status(400).json({ error: `Нельзя повысить из статуса ${u.status}` });
+      }
+    }
+
+    // Обновляем заявку
     await pool.query(
       `UPDATE doc_requests SET status=$1, pr_comment=$2, resolved_at=$3, resolved_by=$4 WHERE id=$5`,
       [status, prComment || null, new Date().toISOString(), resolvedBy || null, req.params.id]
     );
 
+    // ═══ ЭФФЕКТЫ ═══
     if (status === 'approved') {
       if (request.doc_type === 'pension') {
         await pool.query('UPDATE users SET has_pension=true WHERE phone=$1', [request.user_phone]);
@@ -1430,22 +1450,14 @@ app.post('/api/doc_requests/:id/resolve', async (req, res) => {
           [request.user_phone, new Date().toISOString(), resolvedBy || 'ПР']
         );
       } else if (request.doc_type === 'pm_status') {
-        // ═══ ПМ или ПЗ СТАТУС ═══
-        const uRes = await pool.query('SELECT aura, tonki, status FROM users WHERE phone=$1', [request.user_phone]);
-        if (uRes.rows.length > 0) {
-          const u = uRes.rows[0];
-          let newStatus = null;
-          if (u.aura >= 9999 && u.tonki >= 10) {
-            if (u.status === 'ЖИ') newStatus = 'ПМ';
-            else if (u.status === 'ЗМ') newStatus = 'ПЗ';
-          }
-          if (newStatus) {
-            await pool.query('UPDATE users SET status=$1, tonki=tonki-10 WHERE phone=$2', [newStatus, request.user_phone]);
-            await pool.query('UPDATE bank_pf SET amount = amount + 10 WHERE id=1');
-          }
-        }
+        const uRes = await pool.query('SELECT status FROM users WHERE phone=$1', [request.user_phone]);
+        const u = uRes.rows[0];
+        const newStatus = u.status === 'ЖИ' ? 'ПМ' : 'ПЗ';
+        await pool.query('UPDATE users SET status=$1, tonki=tonki-10 WHERE phone=$2', [newStatus, request.user_phone]);
+        await pool.query('UPDATE bank_pf SET amount = amount + 10 WHERE id=1');
       }
     }
+
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
