@@ -1449,13 +1449,7 @@ app.post('/api/doc_requests/:id/resolve', async (req, res) => {
            ON CONFLICT (phone) DO UPDATE SET granted_at=$2, granted_by=$3`,
           [request.user_phone, new Date().toISOString(), resolvedBy || 'ПР']
         );
-      } else if (request.doc_type === 'pm_status') {
-        const uRes = await pool.query('SELECT status FROM users WHERE phone=$1', [request.user_phone]);
-        const u = uRes.rows[0];
-        const newStatus = u.status === 'ЖИ' ? 'ПМ' : 'ПЗ';
-        await pool.query('UPDATE users SET status=$1, tonki=tonki-10 WHERE phone=$2', [newStatus, request.user_phone]);
-        await pool.query('UPDATE bank_pf SET amount = amount + 10 WHERE id=1');
-      }
+      } else if (request.doc_type === 'pm_status') {}
     }
 
     res.json({ ok: true });
