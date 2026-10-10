@@ -388,8 +388,6 @@ const initDB = async () => {
 
   await pool.query(`CREATE TABLE IF NOT EXISTS chronicle (id INTEGER PRIMARY KEY DEFAULT 1, content TEXT NOT NULL)`);
 
-  await pool.query(`INSERT INTO chronicle (id, content) VALUES (1, $1) ON CONFLICT (id) DO NOTHING`, [DEFAULT_CHRONICLE_TEXT]);
-
     console.log('✅ Таблицы готовы');
   } catch (err) {
     console.error('❌ Ошибка таблиц:', err.stack || err.message);
@@ -483,8 +481,7 @@ app.delete('/api/users/:phone', async (req, res) => {
 app.get('/api/chronicle', async (req, res) => {
   try {
     const r = await pool.query('SELECT content FROM chronicle WHERE id=1');
-    if (r.rows.length === 0) return res.json({ content: DEFAULT_CHRONICLE_TEXT });
-    res.json({ content: r.rows[0].content });
+    res.json({ content: r.rows[0]?.content || null });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
