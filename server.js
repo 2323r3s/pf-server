@@ -418,6 +418,21 @@ app.post('/api/users', async (req, res) => {
       demoted = true;
     }
 
+    // ═══ ЗМ МАКСИМУМ 2 (п. 1.3) ═══
+if (u.status === 'ЗМ') {
+  const currentRes = await pool.query(
+    'SELECT status FROM users WHERE phone=$1',
+    [u.phone]
+  );
+  const wasZM = currentRes.rows[0]?.status === 'ЗМ';
+  if (!wasZM) {
+    const cntRes = await pool.query("SELECT COUNT(*) FROM users WHERE status='ЗМ'");
+    if (parseInt(cntRes.rows[0].count) >= 2) {
+      return res.status(400).json({ error: 'Максимум 2 ЗМ в подвале (п. 1.3)' });
+    }
+  }
+}
+
     await pool.query(
       `INSERT INTO users (phone, login, password, first_name, last_name, code, paradox, tripcode, status, aura, tonki, avatar, has_pension, has_insurance, insurance_until, is_banned, ban_reason, ban_type, stamp_until, has_created_party)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
