@@ -791,6 +791,67 @@ app.post('/api/professions/pay_salary', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ═══ ВЫПЛАТА ЗАРПЛАТЫ СТАТУСА (ПВ/ЗМ/ПЗ/Пенсия) ═══
+app.post('/api/status_salary/pay', async (req, res) => {
+  try {
+    const { phone, amount, paidBy } = req.body;
+    if (!phone || !amount || amount <= 0) {
+      return res.status(400).json({ error: 'Bad params' });
+    }
+
+    // Проверяем что юзер реально имеет право на эту ЗП
+    const uRes = await pool.query('SELECT * FROM users WHERE phone=$1', [phone]);
+    if (uRes.rows.length === 0) return res.status(404).json({ error: 'User not found' });
+    const u = uRes.rows[0];
+
+    let expectedAmount = 0;
+    if (u.has_pension) expectedAmount = 15;
+    else if (['ПВ', 'ЗМ', 'ПЗ'].includes(u.status)) expectedAmount = 10;
+    else return res.status(400).json({ error: 'У этого ЖИ нет зарплаты статуса' });
+
+    if (amount !== expectedAmount) {
+      return res.status(400).json({ error: `Сумма должна быть ${expectedAmount} ₮` });
+    }
+
+    // Списываем из казны ПФ
+    const bankRes = await pool.query('SELECT amount FROM bank_pf WHERE id=1');
+    const bankAmount = parseInt(bankRes.rows[0]?.amount || 0);
+    if (bankAmount < amount) {
+      return res.status(400).json({ error: 'Недостаточно в казне ПФ' });
+    }
+    await pool.query('UPDATE bank_pf SET amount=amount-$1 WHERE id=1', [amount]);
+
+    // Начисляем ЖИ
+    await pool.query('UPDATE users SET tonki=tonki+$1 WHERE phone=$2', [amount, phone]);
+
+    // Записываем в историю salary_paid
+    await pool.query(
+      `INSERT INTO salary_paid (phone, last_paid) VALUES ($1, $2)
+       ON CONFLICT (phone) DO UPDATE SET last_paid=$2`,
+      [phone, new Date().toISOString()]
+    );
+
+    // Пишем в общий чат
+    const reason = u.has_pension ? 'Пенсия' : `Зарплата ${u.status}`;
+    await pool.query(
+      `INSERT INTO messages (id, from_phone, from_name, from_avatar, from_status, text, time, date)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [
+        Date.now(),
+        'system',
+        '💰 Банк ПФ',
+        null,
+        'БОТ',
+        `Выдана ${reason} ${amount} ₮ для ${u.first_name} ${u.last_name}`,
+        new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }),
+        new Date().toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })
+      ]
+    );
+
+    res.json({ ok: true, amount });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.get('/api/profession_requests', async (req, res) => {
   try {
     const r = await pool.query('SELECT * FROM profession_requests ORDER BY id DESC');
