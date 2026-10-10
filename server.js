@@ -6,6 +6,22 @@ const { Pool } = require('pg');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+const DEFAULT_CHRONICLE_TEXT = `📜 ЛЕТОПИСЬ ПОДВАЛЬНОЙ ФЕДЕРАЦИИ
+
+Эра 1. Основание (23 октября 2025)
+— Основание Подвальной Федерации.
+— Первый подвал, первый ПР, первые ЖИ.
+
+Эра 2. ОКПФ (10 апреля)
+— Принятие Официальной Конституции ПФ.
+— Начало второй эры подвала.
+
+Здесь ПР записывает все ключевые моменты ПФ.
+
+—
+Пункт 7.13 ДПППФ: «В ППФ есть вкладка Летописи ПФ. от 1 по нашу эру подвала. Там ведутся все ключевые моменты ПФ.»
+`;
+
 app.use(cors());
 app.use(express.json());
 
@@ -370,6 +386,10 @@ const initDB = async () => {
       )
     `);
 
+  await pool.query(`CREATE TABLE IF NOT EXISTS chronicle (id INTEGER PRIMARY KEY DEFAULT 1, content TEXT NOT NULL)`);
+
+  await pool.query(`INSERT INTO chronicle (id, content) VALUES (1, $1) ON CONFLICT (id) DO NOTHING`, [DEFAULT_CHRONICLE_TEXT]);
+
     console.log('✅ Таблицы готовы');
   } catch (err) {
     console.error('❌ Ошибка таблиц:', err.stack || err.message);
@@ -453,6 +473,30 @@ app.post('/api/users/bonus_aura', async (req, res) => {
 app.delete('/api/users/:phone', async (req, res) => {
   try {
     await pool.query('DELETE FROM users WHERE phone=$1', [req.params.phone]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ═══════════════════════════════════════════════════════
+// ЛЕТОПИСЬ ПФ
+// ═══════════════════════════════════════════════════════
+app.get('/api/chronicle', async (req, res) => {
+  try {
+    const r = await pool.query('SELECT content FROM chronicle WHERE id=1');
+    if (r.rows.length === 0) return res.json({ content: DEFAULT_CHRONICLE_TEXT });
+    res.json({ content: r.rows[0].content });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/chronicle', async (req, res) => {
+  try {
+    const { content } = req.body;
+    if (typeof content !== 'string') return res.status(400).json({ error: 'Bad content' });
+    await pool.query(
+      `INSERT INTO chronicle (id, content) VALUES (1, $1)
+       ON CONFLICT (id) DO UPDATE SET content=$1`,
+      [content]
+    );
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
