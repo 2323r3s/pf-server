@@ -385,6 +385,10 @@ const initDB = async () => {
       )
     `);
 
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMP DEFAULT NOW()`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_tax_paid_at TIMESTAMP`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_okpf_day_year INTEGER`);
+
     console.log('✅ Таблицы готовы');
   } catch (err) {
     console.error('❌ Ошибка таблиц:', err.stack || err.message);
@@ -395,6 +399,24 @@ initDB();
 
 app.get('/', (req, res) => {
   res.send('🏚️ Подвальная Федерация — сервер работает (PostgreSQL)!');
+});
+
+app.post('/api/users/heartbeat', async (req, res) => {
+  try {
+    const { phone } = req.body;
+    if (!phone) return res.status(400).json({ error: 'Bad params' });
+    await pool.query('UPDATE users SET last_seen_at=NOW() WHERE phone=$1', [phone]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/users/tax_paid', async (req, res) => {
+  try {
+    const { phone } = req.body;
+    if (!phone) return res.status(400).json({ error: 'Bad params' });
+    await pool.query('UPDATE users SET last_tax_paid_at=NOW() WHERE phone=$1', [phone]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // ═══════════════════════════════════════════════════════
@@ -2202,6 +2224,31 @@ const tickRate = async () => {
 
 setInterval(tickRate, 30 * 1000);
 setTimeout(tickRate, 5000);
+
+const tickHolidays = async () => {
+  try {
+    const now = new Date();
+    const month = now.getMonth() + 1;
+    const day = now.getDate();
+    const year = now.getFullYear();
+
+    if (month === 4 && day === 10) {
+      const usersRes = await pool.query(
+        'SELECT phone, last_okpf_day_year FROM users WHERE status <> $1',
+        ['ПР']
+      );
+      for (const u of usersRes.rows) {
+        if (u.last_okpf_day_year === year) continue;
+        await pool.query('UPDATE users SET tonki = tonki + 10, last_okpf_day_year = $1 WHERE phone = $2', [year, u.phone]);
+      }
+    }
+  } catch (err) {
+    console.error('tickHolidays:', err.message);
+  }
+};
+
+setInterval(tickHolidays, 60 * 60 * 1000);
+setTimeout(tickHolidays, 10 * 1000);
 
 // ═══════════════════════════════════════════════════════
 // ЗАПУСК
