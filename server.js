@@ -386,8 +386,16 @@ const initDB = async () => {
     `);
 
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMP DEFAULT NOW()`);
+
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_tax_paid_at TIMESTAMP`);
+
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_okpf_day_year INTEGER`);
+
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_pf_day_year INTEGER`);
+
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_vacation_year INTEGER`);
+
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_burmaldeem_month TEXT`);
 
     console.log('✅ Таблицы готовы');
   } catch (err) {
@@ -2225,30 +2233,122 @@ const tickRate = async () => {
 setInterval(tickRate, 30 * 1000);
 setTimeout(tickRate, 5000);
 
+// ═══════════════════════════════════════════════════════
+// ПРАЗДНИКИ
+// ═══════════════════════════════════════════════════════
 const tickHolidays = async () => {
   try {
     const now = new Date();
-    const month = now.getMonth() + 1;
+    const month = now.getMonth() + 1; // 1-12
     const day = now.getDate();
     const year = now.getFullYear();
+    const monthKey = `${year}-${String(month).padStart(2, '0')}`;
 
+    const sendSystemMsg = async (text) => {
+      await pool.query(
+        `INSERT INTO messages (id, from_phone, from_name, from_avatar, from_status, text, time, date)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [
+          Date.now() + Math.floor(Math.random() * 100000),
+          'system',
+          '🎉 Праздник',
+          null,
+          'БОТ',
+          text,
+          new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }),
+          new Date().toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })
+        ]
+      );
+    };
+
+    // ═══ ДЕНЬ ОКПФ — 10 апреля, +10₮ ═══
     if (month === 4 && day === 10) {
       const usersRes = await pool.query(
         'SELECT phone, last_okpf_day_year FROM users WHERE status <> $1',
         ['ПР']
       );
+      let count = 0;
       for (const u of usersRes.rows) {
         if (u.last_okpf_day_year === year) continue;
-        await pool.query('UPDATE users SET tonki = tonki + 10, last_okpf_day_year = $1 WHERE phone = $2', [year, u.phone]);
+        await pool.query(
+          'UPDATE users SET tonki = tonki + 10, last_okpf_day_year = $1 WHERE phone = $2',
+          [year, u.phone]
+        );
+        count++;
       }
+      if (count > 0) await sendSystemMsg(`🎉 С Днём ОКПФ! +10 ₮ всем ЖИ (${count} чел.)`);
+    }
+
+    // ═══ ДЕНЬ ПФ — 23 октября, +20₮ ═══
+    if (month === 10 && day === 23) {
+      const usersRes = await pool.query(
+        'SELECT phone, last_pf_day_year FROM users WHERE status <> $1',
+        ['ПР']
+      );
+      let count = 0;
+      for (const u of usersRes.rows) {
+        if (u.last_pf_day_year === year) continue;
+        await pool.query(
+          'UPDATE users SET tonki = tonki + 20, last_pf_day_year = $1 WHERE phone = $2',
+          [year, u.phone]
+        );
+        count++;
+      }
+      if (count > 0) await sendSystemMsg(`🏚️ С Днём ПФ! +20 ₮ всем ЖИ (${count} чел.)`);
+    }
+
+    // ═══ ОТПУСКА — 9 декабря и 21 марта, +10₮ тем, у кого есть профессия ═══
+    if ((month === 12 && day === 9) || (month === 3 && day === 21)) {
+      const usersRes = await pool.query(
+        `SELECT u.phone, u.last_vacation_year
+         FROM users u
+         WHERE u.status <> 'ПР'
+         AND EXISTS (SELECT 1 FROM professions p WHERE p.phone = u.phone)`
+      );
+      let count = 0;
+      for (const u of usersRes.rows) {
+        if (u.last_vacation_year === year) continue;
+        await pool.query(
+          'UPDATE users SET tonki = tonki + 10, last_vacation_year = $1 WHERE phone = $2',
+          [year, u.phone]
+        );
+        count++;
+      }
+      if (count > 0) await sendSystemMsg(`🏖️ Отпуск! +10 ₮ работающим ЖИ (${count} чел.)`);
+    }
+
+    // ═══ ЛЕТНИЕ БУРМАЛДИМ — 23 мая–23 августа, раз в месяц +40₮ работающим ═══
+    const inSummerWindow =
+      (month === 5 && day >= 23) ||
+      (month === 6) ||
+      (month === 7) ||
+      (month === 8 && day <= 23);
+
+    if (inSummerWindow) {
+      const usersRes = await pool.query(
+        `SELECT u.phone, u.last_burmaldeem_month
+         FROM users u
+         WHERE u.status <> 'ПР'
+         AND EXISTS (SELECT 1 FROM professions p WHERE p.phone = u.phone)`
+      );
+      let count = 0;
+      for (const u of usersRes.rows) {
+        if (u.last_burmaldeem_month === monthKey) continue;
+        await pool.query(
+          'UPDATE users SET tonki = tonki + 40, last_burmaldeem_month = $1 WHERE phone = $2',
+          [monthKey, u.phone]
+        );
+        count++;
+      }
+      if (count > 0) await sendSystemMsg(`☀️ Летние бурмалдим! +40 ₮ работающим ЖИ (${count} чел.)`);
     }
   } catch (err) {
     console.error('tickHolidays:', err.message);
   }
 };
 
-setInterval(tickHolidays, 60 * 60 * 1000);
-setTimeout(tickHolidays, 10 * 1000);
+setInterval(tickHolidays, 60 * 60 * 1000);  // раз в час
+setTimeout(tickHolidays, 10 * 1000);         // при запуске через 10 сек
 
 // ═══════════════════════════════════════════════════════
 // ЗАПУСК
