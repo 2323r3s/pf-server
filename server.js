@@ -6,22 +6,6 @@ const { Pool } = require('pg');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-const DEFAULT_CHRONICLE_TEXT = `📜 ЛЕТОПИСЬ ПОДВАЛЬНОЙ ФЕДЕРАЦИИ
-
-Эра 1. Основание (23 октября 2025)
-— Основание Подвальной Федерации.
-— Первый подвал, первый ПР, первые ЖИ.
-
-Эра 2. ОКПФ (10 апреля)
-— Принятие Официальной Конституции ПФ.
-— Начало второй эры подвала.
-
-Здесь ПР записывает все ключевые моменты ПФ.
-
-—
-Пункт 7.13 ДПППФ: «В ППФ есть вкладка Летописи ПФ. от 1 по нашу эру подвала. Там ведутся все ключевые моменты ПФ.»
-`;
-
 app.use(cors());
 app.use(express.json());
 
@@ -125,6 +109,9 @@ const initDB = async () => {
     `);
 
     await pool.query(`CREATE TABLE IF NOT EXISTS docs (key TEXT PRIMARY KEY, content TEXT NOT NULL)`);
+
+    // ═══ ЛЕТОПИСЬ ПФ (п. 7.13) ═══
+    await pool.query(`CREATE TABLE IF NOT EXISTS chronicle (id INTEGER PRIMARY KEY DEFAULT 1, content TEXT)`);
 
     await pool.query(`
       CREATE TABLE IF NOT EXISTS rate (
@@ -386,7 +373,17 @@ const initDB = async () => {
       )
     `);
 
-  await pool.query(`CREATE TABLE IF NOT EXISTS chronicle (id INTEGER PRIMARY KEY DEFAULT 1, content TEXT NOT NULL)`);
+    // ═══ ЖУРНАЛ СБРОСОВ ПАРОЛЯ ═══
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS password_resets (
+        id BIGINT PRIMARY KEY,
+        user_phone TEXT NOT NULL,
+        user_name TEXT NOT NULL,
+        login TEXT NOT NULL,
+        phone TEXT NOT NULL,
+        date TEXT NOT NULL
+      )
+    `);
 
     console.log('✅ Таблицы готовы');
   } catch (err) {
@@ -415,8 +412,10 @@ app.post('/api/users', async (req, res) => {
     const u = req.body;
 
     // ═══ АВТОПОНИЖЕНИЕ ПМ → ЖИ при ауре < 9800 (п. 2.5) ═══
+    let demoted = false;
     if (u.status === 'ПМ' && (u.aura || 0) < 9800) {
       u.status = 'ЖИ';
+      demoted = true;
     }
 
     await pool.query(
@@ -434,7 +433,22 @@ app.post('/api/users', async (req, res) => {
        u.isBanned || false, u.banReason || null, u.banType || null, u.stampUntil || null,
        u.hasCreatedParty || false]
     );
-    res.json({ ok: true });
+
+    if (demoted) {
+      await pool.query(
+        `INSERT INTO aura_history (id, phone, delta, reason, date)
+         VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO NOTHING`,
+        [
+          Date.now() + Math.floor(Math.random() * 1000),
+          u.phone,
+          0,
+          '⚠️ Понижение ПМ → ЖИ (аура упала ниже 9800, п. 2.5)',
+          new Date().toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+        ]
+      );
+    }
+
+    res.json({ ok: true, demoted });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -452,6 +466,16 @@ app.post('/api/users/bonus_aura', async (req, res) => {
     const newAura = (u.aura || 0) + delta;
 
     await pool.query('UPDATE users SET aura=$1 WHERE phone=$2', [newAura, phone]);
+
+    // ═══ АВТОПОНИЖЕНИЕ ПМ → ЖИ при ауре < 9800 (п. 2.5) ═══
+    let finalStatus = u.status;
+    let demoted = false;
+    if (u.status === 'ПМ' && newAura < 9800) {
+      finalStatus = 'ЖИ';
+      demoted = true;
+      await pool.query('UPDATE users SET status=$1 WHERE phone=$2', ['ЖИ', phone]);
+    }
+
     await pool.query(
       `INSERT INTO aura_history (id, phone, delta, reason, date)
        VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO NOTHING`,
@@ -464,7 +488,21 @@ app.post('/api/users/bonus_aura', async (req, res) => {
       ]
     );
 
-    res.json({ ok: true, newAura });
+    if (demoted) {
+      await pool.query(
+        `INSERT INTO aura_history (id, phone, delta, reason, date)
+         VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO NOTHING`,
+        [
+          Date.now() + Math.floor(Math.random() * 1000) + 1,
+          phone,
+          0,
+          '⚠️ Понижение ПМ → ЖИ (аура упала ниже 9800, п. 2.5)',
+          new Date().toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+        ]
+      );
+    }
+
+    res.json({ ok: true, newAura, status: finalStatus, demoted });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -476,33 +514,8 @@ app.delete('/api/users/:phone', async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════
-// ЛЕТОПИСЬ ПФ
-// ═══════════════════════════════════════════════════════
-app.get('/api/chronicle', async (req, res) => {
-  try {
-    const r = await pool.query('SELECT content FROM chronicle WHERE id=1');
-    res.json({ content: r.rows[0]?.content || null });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.post('/api/chronicle', async (req, res) => {
-  try {
-    const { content } = req.body;
-    if (typeof content !== 'string') return res.status(400).json({ error: 'Bad content' });
-    await pool.query(
-      `INSERT INTO chronicle (id, content) VALUES (1, $1)
-       ON CONFLICT (id) DO UPDATE SET content=$1`,
-      [content]
-    );
-    res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// ═══════════════════════════════════════════════════════
 // СБРОС ПАРОЛЯ
 // ═══════════════════════════════════════════════════════
-
-// Проверка логина + телефона
 app.post('/api/password_reset/verify', async (req, res) => {
   try {
     const { login, phone } = req.body;
@@ -530,7 +543,6 @@ app.post('/api/password_reset/verify', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Сброс пароля
 app.post('/api/password_reset/commit', async (req, res) => {
   try {
     const { login, phone, newPassword } = req.body;
@@ -556,7 +568,6 @@ app.post('/api/password_reset/commit', async (req, res) => {
 
     await pool.query('UPDATE users SET password=$1 WHERE phone=$2', [newPassword, u.phone]);
 
-    // Запись в журнал
     await pool.query(
       `INSERT INTO password_resets (id, user_phone, user_name, login, phone, date)
        VALUES ($1, $2, $3, $4, $5, $6)`,
@@ -570,7 +581,6 @@ app.post('/api/password_reset/commit', async (req, res) => {
       ]
     );
 
-    // Сообщение в общий чат от системы
     await pool.query(
       `INSERT INTO messages (id, from_phone, from_name, from_avatar, from_status, text, time, date)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
@@ -590,7 +600,6 @@ app.post('/api/password_reset/commit', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Журнал сбросов (только ПР)
 app.get('/api/password_resets', async (req, res) => {
   try {
     const r = await pool.query('SELECT * FROM password_resets ORDER BY id DESC LIMIT 100');
@@ -813,7 +822,7 @@ app.post('/api/profession_requests/:id/resolve', async (req, res) => {
       );
 
       const PRICES = {
-        pivatroon: 8, chekunets: 10, shpioniro: 8, doker: 8, tester: 10,
+        pivatroon: 10, shpioniro: 8, doker: 8, tester: 10, letopisec: 0,
       };
       const price = PRICES[request.profession] || 0;
       if (price > 0) {
@@ -1035,7 +1044,6 @@ app.post('/api/casino/spin', async (req, res) => {
 
     const newTonki = user.tonki - bet + winAmount;
 
-    // ═══ ДЖЕКПОТ: +1000 ауры ═══
     let auraBonus = 0;
     if (prizeType === 'jackpot_banana') auraBonus = 1000;
 
@@ -1222,7 +1230,6 @@ app.post('/api/elections/finish', async (req, res) => {
     await pool.query('UPDATE users SET status=$1 WHERE status=$2 AND phone<>$3', ['ЖИ', 'ПВ', winnerPhone]);
     await pool.query('UPDATE users SET tonki = tonki + 100 WHERE phone=$1', [winnerPhone]);
 
-    // ═══ НАГРАДА: +1000 ауры всем участникам партии победителя ═══
     let partyMembers = [];
     try {
       const cRes = await pool.query(
@@ -1548,6 +1555,29 @@ app.post('/api/docs', async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════
+// ЛЕТОПИСЬ ПФ (п. 7.13)
+// ═══════════════════════════════════════════════════════
+app.get('/api/chronicle', async (req, res) => {
+  try {
+    const r = await pool.query('SELECT content FROM chronicle WHERE id=1');
+    res.json({ content: r.rows[0]?.content || null });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/chronicle', async (req, res) => {
+  try {
+    const { content } = req.body;
+    if (typeof content !== 'string') return res.status(400).json({ error: 'Bad content' });
+    await pool.query(
+      `INSERT INTO chronicle (id, content) VALUES (1, $1)
+       ON CONFLICT (id) DO UPDATE SET content=$1`,
+      [content]
+    );
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ═══════════════════════════════════════════════════════
 // КУРС
 // ═══════════════════════════════════════════════════════
 app.get('/api/rate', async (req, res) => {
@@ -1716,7 +1746,6 @@ app.post('/api/doc_requests/:id/resolve', async (req, res) => {
           [request.user_phone, new Date().toISOString(), resolvedBy || 'ПР']
         );
       } else if (request.doc_type === 'pm_status') {
-        // ═══ ПМ или ПЗ ═══
         // ПР ставит статус ВРУЧНУЮ через 👥 Данные ЖИ → карточка → 🏷️ Статус.
       }
     }
@@ -1727,7 +1756,6 @@ app.post('/api/doc_requests/:id/resolve', async (req, res) => {
 // ═══════════════════════════════════════════════════════
 // ПАРТИИ
 // ═══════════════════════════════════════════════════════
-
 app.get('/api/parties', async (req, res) => {
   try {
     const partiesRes = await pool.query('SELECT * FROM parties ORDER BY id ASC');
@@ -1864,7 +1892,6 @@ app.delete('/api/parties/:id', async (req, res) => {
     await pool.query('DELETE FROM party_members WHERE party_id=$1', [req.params.id]);
     await pool.query('DELETE FROM parties WHERE id=$1', [req.params.id]);
 
-    // ═══ СБРОС ФЛАГА: глава снова может создать партию ═══
     await pool.query('UPDATE users SET has_created_party=false WHERE phone=$1', [leaderPhone]);
 
     res.json({ ok: true });
