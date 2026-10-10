@@ -1815,11 +1815,16 @@ app.delete('/api/parties/:id', async (req, res) => {
 
     if (!isPR && !isLeader) return res.status(403).json({ error: 'Нет прав' });
 
+    const leaderPhone = pRes.rows[0].leader_phone;
+
     await pool.query('DELETE FROM party_messages WHERE party_id=$1', [req.params.id]);
     await pool.query('DELETE FROM party_candidates WHERE party_id=$1', [req.params.id]);
     await pool.query('DELETE FROM party_requests WHERE party_id=$1', [req.params.id]);
     await pool.query('DELETE FROM party_members WHERE party_id=$1', [req.params.id]);
     await pool.query('DELETE FROM parties WHERE id=$1', [req.params.id]);
+
+    // ═══ СБРОС ФЛАГА: глава снова может создать партию ═══
+    await pool.query('UPDATE users SET has_created_party=false WHERE phone=$1', [leaderPhone]);
 
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
