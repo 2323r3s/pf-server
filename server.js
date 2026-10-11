@@ -43,6 +43,24 @@ const initDB = async () => {
         has_created_party BOOLEAN DEFAULT false
       )
     `);
+
+        await pool.query(`
+      CREATE TABLE IF NOT EXISTS debts (
+        id BIGINT PRIMARY KEY,
+        debtor_phone TEXT NOT NULL,
+        debtor_name TEXT NOT NULL,
+        creditor_phone TEXT NOT NULL,
+        creditor_name TEXT NOT NULL,
+        amount INTEGER NOT NULL,
+        reason TEXT NOT NULL,
+        due_date TIMESTAMP NOT NULL,
+        status TEXT DEFAULT 'active',
+        created_at TIMESTAMP DEFAULT NOW(),
+        paid_at TIMESTAMP,
+        created_by TEXT
+      )
+    `);
+    
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS has_pension BOOLEAN DEFAULT false`);
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS has_insurance BOOLEAN DEFAULT false`);
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS insurance_until TIMESTAMP`);
@@ -396,6 +414,7 @@ const initDB = async () => {
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_vacation_year INTEGER`);
 
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_burmaldeem_month TEXT`);
+
 
     console.log('✅ Таблицы готовы');
   } catch (err) {
@@ -1243,6 +1262,75 @@ app.get('/api/casino/permissions', async (req, res) => {
   try {
     const r = await pool.query('SELECT * FROM casino_permission');
     res.json(r.rows.map(x => ({ phone: x.phone, grantedAt: x.granted_at, grantedBy: x.granted_by })));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ═══════════════════════════════════════════════════════
+// ДОЛГИ
+// ═══════════════════════════════════════════════════════
+app.get('/api/debts', async (req, res) => {
+  try {
+    const r = await pool.query('SELECT * FROM debts ORDER BY id DESC');
+    res.json(r.rows.map(d => ({
+      id: d.id,
+      debtorPhone: d.debtor_phone,
+      debtorName: d.debtor_name,
+      creditorPhone: d.creditor_phone,
+      creditorName: d.creditor_name,
+      amount: d.amount,
+      reason: d.reason,
+      dueDate: d.due_date,
+      status: d.status,
+      createdAt: d.created_at,
+      paidAt: d.paid_at,
+      createdBy: d.created_by,
+    })));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/debts', async (req, res) => {
+  try {
+    const d = req.body;
+    if (!d.debtorPhone || !d.creditorPhone || !d.amount || !d.reason || !d.dueDate) {
+      return res.status(400).json({ error: 'Bad params' });
+    }
+    const id = Date.now();
+    await pool.query(
+      `INSERT INTO debts (id, debtor_phone, debtor_name, creditor_phone, creditor_name, amount, reason, due_date, status, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'active',$9)`,
+      [id, d.debtorPhone, d.debtorName, d.creditorPhone, d.creditorName, d.amount, d.reason, d.dueDate, d.createdBy || null]
+    );
+    res.json({ ok: true, id });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/debts/:id/pay', async (req, res) => {
+  try {
+    const now = new Date().toISOString();
+    const r = await pool.query(
+      `UPDATE debts SET status='paid', paid_at=$1 WHERE id=$2 RETURNING id`,
+      [now, req.params.id]
+    );
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    res.json({ ok: true, paidAt: now });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/debts/:id', async (req, res) => {
+  try {
+    const { deletedBy, deletedByPhone } = req.body;
+    const debtRes = await pool.query('SELECT * FROM debts WHERE id=$1', [req.params.id]);
+    if (debtRes.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    const debt = debtRes.rows[0];
+
+    const uRes = await pool.query('SELECT status FROM users WHERE phone=$1', [deletedByPhone]);
+    const isPR = uRes.rows.length > 0 && uRes.rows[0].status === 'ПР';
+    const isCreator = debt.created_by === deletedBy;
+
+    if (!isPR && !isCreator) return res.status(403).json({ error: 'Нет прав' });
+
+    await pool.query('DELETE FROM debts WHERE id=$1', [req.params.id]);
+    res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
