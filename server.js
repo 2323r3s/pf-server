@@ -501,6 +501,16 @@ const initDB = async () => {
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_auto_credit_at TIMESTAMP`);
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_auto_debtor_at TIMESTAMP`);
 
+        // ═══ ГОЛОСОВЫЕ СООБЩЕНИЯ ═══
+    await pool.query(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS voice TEXT`);
+    await pool.query(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS voice_duration INTEGER`);
+    await pool.query(`ALTER TABLE private_messages ADD COLUMN IF NOT EXISTS voice TEXT`);
+    await pool.query(`ALTER TABLE private_messages ADD COLUMN IF NOT EXISTS voice_duration INTEGER`);
+    await pool.query(`ALTER TABLE group_messages ADD COLUMN IF NOT EXISTS voice TEXT`);
+    await pool.query(`ALTER TABLE group_messages ADD COLUMN IF NOT EXISTS voice_duration INTEGER`);
+    await pool.query(`ALTER TABLE party_messages ADD COLUMN IF NOT EXISTS voice TEXT`);
+    await pool.query(`ALTER TABLE party_messages ADD COLUMN IF NOT EXISTS voice_duration INTEGER`);
+
     console.log('✅ Таблицы готовы');
   } catch (err) {
     console.error('❌ Ошибка таблиц:', err.stack || err.message);
@@ -1189,6 +1199,7 @@ app.get('/api/private/:chatId', async (req, res) => {
       id: m.id, chatId: m.chat_id,
       from: m.from_phone, fromName: m.from_name,
       text: m.text, replyTo: m.reply_to,
+      voice: m.voice, voiceDuration: m.voice_duration,
       time: m.time, date: m.date,
     })));
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -1198,9 +1209,9 @@ app.post('/api/private', async (req, res) => {
   try {
     const m = req.body;
     await pool.query(
-      `INSERT INTO private_messages (id, chat_id, from_phone, from_name, text, reply_to, time, date)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (id) DO NOTHING`,
-      [m.id, m.chatId, m.from, m.fromName, m.text || '', m.replyTo || null, m.time, m.date || null]
+      `INSERT INTO private_messages (id, chat_id, from_phone, from_name, text, reply_to, voice, voice_duration, time, date)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (id) DO NOTHING`,
+      [m.id, m.chatId, m.from, m.fromName, m.text || '', m.replyTo || null, m.voice || null, m.voiceDuration || null, m.time, m.date || null]
     );
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -1215,6 +1226,13 @@ app.get('/api/messages', async (req, res) => {
       fromAvatar: m.from_avatar, fromStatus: m.from_status,
       text: m.text, replyTo: m.reply_to, time: m.time, date: m.date,
     })));
+      res.json(r.rows.map(m => ({
+      id: m.id, from: m.from_phone, fromName: m.from_name,
+      fromAvatar: m.from_avatar, fromStatus: m.from_status,
+      text: m.text, replyTo: m.reply_to, 
+      voice: m.voice, voiceDuration: m.voice_duration,
+      time: m.time, date: m.date,
+    })));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -1222,9 +1240,9 @@ app.post('/api/messages', async (req, res) => {
   try {
     const m = req.body;
     await pool.query(
-      `INSERT INTO messages (id, from_phone, from_name, from_avatar, from_status, text, reply_to, time, date)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (id) DO NOTHING`,
-      [m.id, m.from, m.fromName, m.fromAvatar, m.fromStatus, m.text || '', m.replyTo || null, m.time, m.date]
+      `INSERT INTO messages (id, from_phone, from_name, from_avatar, from_status, text, reply_to, voice, voice_duration, time, date)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT (id) DO NOTHING`,
+      [m.id, m.from, m.fromName, m.fromAvatar, m.fromStatus, m.text || '', m.replyTo || null, m.voice || null, m.voiceDuration || null, m.time, m.date]
     );
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -1427,7 +1445,9 @@ app.get('/api/group_messages/:groupId', async (req, res) => {
     res.json(r.rows.map(m => ({
       id: m.id, groupId: m.group_id,
       from: m.from_phone, fromName: m.from_name, fromAvatar: m.from_avatar,
-      text: m.text, replyTo: m.reply_to, time: m.time, date: m.date,
+      text: m.text, replyTo: m.reply_to,
+      voice: m.voice, voiceDuration: m.voice_duration,
+      time: m.time, date: m.date,
     })));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -1436,9 +1456,9 @@ app.post('/api/group_messages', async (req, res) => {
   try {
     const m = req.body;
     await pool.query(
-      `INSERT INTO group_messages (id, group_id, from_phone, from_name, from_avatar, text, reply_to, time, date)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (id) DO NOTHING`,
-      [m.id, m.groupId, m.from, m.fromName, m.fromAvatar || null, m.text || '', m.replyTo || null, m.time, m.date || null]
+      `INSERT INTO group_messages (id, group_id, from_phone, from_name, from_avatar, text, reply_to, voice, voice_duration, time, date)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT (id) DO NOTHING`,
+      [m.id, m.groupId, m.from, m.fromName, m.fromAvatar || null, m.text || '', m.replyTo || null, m.voice || null, m.voiceDuration || null, m.time, m.date || null]
     );
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -2607,7 +2627,9 @@ app.get('/api/party_messages/:partyId', async (req, res) => {
     );
     res.json(r.rows.map(m => ({
       id: m.id, partyId: m.party_id, from: m.from_phone,
-      fromName: m.from_name, text: m.text, time: m.time,
+      fromName: m.from_name, text: m.text, replyTo: m.reply_to,
+      voice: m.voice, voiceDuration: m.voice_duration,
+      time: m.time, date: m.date,
     })));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -2616,10 +2638,10 @@ app.post('/api/party_messages', async (req, res) => {
   try {
     const m = req.body;
     await pool.query(
-      `INSERT INTO party_messages (id, party_id, from_phone, from_name, text, time)
-       VALUES ($1, $2, $3, $4, $5, $6)
+      `INSERT INTO party_messages (id, party_id, from_phone, from_name, text, reply_to, voice, voice_duration, time, date)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        ON CONFLICT (id) DO NOTHING`,
-      [m.id, m.partyId, m.from, m.fromName, m.text || '', m.time]
+      [m.id, m.partyId, m.from, m.fromName, m.text || '', m.replyTo || null, m.voice || null, m.voiceDuration || null, m.time, m.date || null]
     );
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
