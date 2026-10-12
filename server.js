@@ -521,6 +521,15 @@ const initDB = async () => {
     await pool.query(`ALTER TABLE party_messages ADD COLUMN IF NOT EXISTS voice TEXT`);
     await pool.query(`ALTER TABLE party_messages ADD COLUMN IF NOT EXISTS voice_duration INTEGER`);
 
+        // ═══ РАСШИРЕНИЕ ДОЛГОВ ═══
+    await pool.query(`ALTER TABLE debts ADD COLUMN IF NOT EXISTS is_government BOOLEAN DEFAULT false`);
+    await pool.query(`ALTER TABLE debts ADD COLUMN IF NOT EXISTS appeal_status TEXT`);
+    await pool.query(`ALTER TABLE debts ADD COLUMN IF NOT EXISTS appeal_reason TEXT`);
+    await pool.query(`ALTER TABLE debts ADD COLUMN IF NOT EXISTS appeal_pr_comment TEXT`);
+    await pool.query(`ALTER TABLE debts ADD COLUMN IF NOT EXISTS appeal_created_at TEXT`);
+    await pool.query(`ALTER TABLE debts ADD COLUMN IF NOT EXISTS appeal_resolved_at TEXT`);
+    await pool.query(`ALTER TABLE debts ADD COLUMN IF NOT EXISTS appeal_resolved_by TEXT`);
+
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS farm_aura_applied BOOLEAN DEFAULT false`);
 
     console.log('✅ Таблицы готовы');
@@ -2792,6 +2801,13 @@ app.get('/api/debts', async (req, res) => {
       createdAt: d.created_at,
       paidAt: d.paid_at,
       createdBy: d.created_by,
+      isGovernment: d.is_government || false,
+      appealStatus: d.appeal_status || null,
+      appealReason: d.appeal_reason || null,
+      appealPrComment: d.appeal_pr_comment || null,
+      appealCreatedAt: d.appeal_created_at || null,
+      appealResolvedAt: d.appeal_resolved_at || null,
+      appealResolvedBy: d.appeal_resolved_by || null,
     })));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -2804,9 +2820,9 @@ app.post('/api/debts', async (req, res) => {
     }
     const id = Date.now();
     await pool.query(
-      `INSERT INTO debts (id, debtor_phone, debtor_name, creditor_phone, creditor_name, amount, reason, due_date, status, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'active',$9)`,
-      [id, d.debtorPhone, d.debtorName, d.creditorPhone, d.creditorName, d.amount, d.reason, d.dueDate, d.createdBy || null]
+      `INSERT INTO debts (id, debtor_phone, debtor_name, creditor_phone, creditor_name, amount, reason, due_date, status, created_by, is_government)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'active',$9,$10)`,
+      [id, d.debtorPhone, d.debtorName, d.creditorPhone, d.creditorName, d.amount, d.reason, d.dueDate, d.createdBy || null, d.isGovernment || false]
     );
     res.json({ ok: true, id });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -2814,13 +2830,222 @@ app.post('/api/debts', async (req, res) => {
 
 app.post('/api/debts/:id/pay', async (req, res) => {
   try {
+    const { paidBy } = req.body;
+    const debtRes = await pool.query('SELECT * FROM debts WHERE id=$1', [req.params.id]);
+    if (debtRes.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    const debt = debtRes.rows[0];
+
+    if (debt.status === 'paid') return res.status(400).json({ error: 'Уже выплачен' });
+
+    // ═══ Списываем у должника ═══
+    const debtorRes = await pool.query('SELECT * FROM users WHERE phone=$1', [debt.debtor_phone]);
+    if (debtorRes.rows.length === 0) return res.status(404).json({ error: 'Должник не найден' });
+    const debtor = debtorRes.rows[0];
+
+    if ((debtor.tonki || 0) < debt.amount) {
+      return res.status(400).json({
+        error: `Не хватает ${debt.amount - (debtor.tonki || 0)} ₮`,
+        need: debt.amount - (debtor.tonki || 0),
+      });
+    }
+
+    await pool.query(
+      'UPDATE users SET tonki = tonki - $1 WHERE phone = $2',
+      [debt.amount, debt.debtor_phone]
+    );
+
+    // ═══ Начисляем кредитору (или ПР для гос. долга) ═══
+    let recipientPhone = debt.creditor_phone;
+    let recipientName = debt.creditor_name;
+
+    if (debt.is_government) {
+      // Гос. долг → идёт ПР
+      const prRes = await pool.query("SELECT phone, first_name, last_name FROM users WHERE status='ПР' LIMIT 1");
+      if (prRes.rows.length > 0) {
+        recipientPhone = prRes.rows[0].phone;
+        recipientName = `${prRes.rows[0].first_name} ${prRes.rows[0].last_name}`;
+      }
+    }
+
+    const credRes = await pool.query('SELECT * FROM users WHERE phone=$1', [recipientPhone]);
+    if (credRes.rows.length > 0) {
+      await pool.query(
+        'UPDATE users SET tonki = tonki + $1 WHERE phone = $2',
+        [debt.amount, recipientPhone]
+      );
+    }
+
+    // ═══ Помечаем долг выплаченным ═══
     const now = new Date().toISOString();
-    const r = await pool.query(
-      `UPDATE debts SET status='paid', paid_at=$1 WHERE id=$2 RETURNING id`,
+    await pool.query(
+      `UPDATE debts SET status='paid', paid_at=$1 WHERE id=$2`,
       [now, req.params.id]
     );
-    if (r.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+
+    // ═══ Сообщение в общий чат ═══
+    await pool.query(
+      `INSERT INTO messages (id, from_phone, from_name, from_avatar, from_status, text, time, date)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [
+        Date.now() + Math.floor(Math.random() * 100000),
+        'system',
+        '💸 Долги',
+        null,
+        'БОТ',
+        `💵 ${debt.debtor_name} выплатил ${debt.amount}₮ → ${recipientName}`,
+        new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }),
+        new Date().toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })
+      ]
+    );
+
+    res.json({ ok: true, paidAt: now, amount: debt.amount, recipient: recipientName });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ═══════════════════════════════════════════════════════
+// ЗАКРЫТЬ ДОЛГ ВРУЧНУЮ (ПР / кредитор)
+// ═══════════════════════════════════════════════════════
+app.post('/api/debts/:id/mark_paid', async (req, res) => {
+  try {
+    const { markedBy, markedByPhone } = req.body;
+    const debtRes = await pool.query('SELECT * FROM debts WHERE id=$1', [req.params.id]);
+    if (debtRes.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    const debt = debtRes.rows[0];
+
+    if (debt.status === 'paid') return res.status(400).json({ error: 'Уже выплачен' });
+
+    const uRes = await pool.query('SELECT status FROM users WHERE phone=$1', [markedByPhone]);
+    const isPR = uRes.rows.length > 0 && uRes.rows[0].status === 'ПР';
+    const isCreditor = debt.creditor_phone === markedByPhone;
+
+    if (!isPR && !isCreditor) return res.status(403).json({ error: 'Нет прав' });
+
+    const now = new Date().toISOString();
+    await pool.query(
+      `UPDATE debts SET status='paid', paid_at=$1 WHERE id=$2`,
+      [now, req.params.id]
+    );
+
     res.json({ ok: true, paidAt: now });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ═══════════════════════════════════════════════════════
+// АПЕЛЛЯЦИЯ НА ДОЛГ (должник)
+// ═══════════════════════════════════════════════════════
+app.post('/api/debts/:id/appeal', async (req, res) => {
+  try {
+    const { userPhone, reason } = req.body;
+    if (!userPhone || !reason) return res.status(400).json({ error: 'Bad params' });
+
+    const debtRes = await pool.query('SELECT * FROM debts WHERE id=$1', [req.params.id]);
+    if (debtRes.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    const debt = debtRes.rows[0];
+
+    if (debt.debtor_phone !== userPhone) return res.status(403).json({ error: 'Не твой долг' });
+    if (debt.status === 'paid') return res.status(400).json({ error: 'Долг уже выплачен' });
+    if (debt.appeal_status === 'pending') return res.status(400).json({ error: 'Апелляция уже отправлена' });
+
+    const now = new Date().toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+    await pool.query(
+      `UPDATE debts SET
+        appeal_status='pending',
+        appeal_reason=$1,
+        appeal_pr_comment=NULL,
+        appeal_created_at=$2,
+        appeal_resolved_at=NULL,
+        appeal_resolved_by=NULL
+       WHERE id=$3`,
+      [reason.trim(), now, req.params.id]
+    );
+
+    // Сообщение ПР
+    await pool.query(
+      `INSERT INTO messages (id, from_phone, from_name, from_avatar, from_status, text, time, date)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [
+        Date.now() + Math.floor(Math.random() * 100000),
+        'system',
+        '📝 Апелляция на долг',
+        null,
+        'БОТ',
+        `📝 ${debt.debtor_name} обжалует долг ${debt.amount}₮: «${reason.trim()}»`,
+        new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }),
+        new Date().toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })
+      ]
+    );
+
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ═══════════════════════════════════════════════════════
+// РЕШИТЬ АПЕЛЛЯЦИЮ ПО ДОЛГУ (ПР)
+// ═══════════════════════════════════════════════════════
+app.post('/api/debts/:id/appeal/resolve', async (req, res) => {
+  try {
+    const { status, prComment, resolvedBy, resolvedByPhone } = req.body;
+    if (!['approved', 'rejected'].includes(status)) return res.status(400).json({ error: 'Bad status' });
+
+    const uRes = await pool.query('SELECT status FROM users WHERE phone=$1', [resolvedByPhone]);
+    if (uRes.rows.length === 0 || uRes.rows[0].status !== 'ПР') {
+      return res.status(403).json({ error: 'Только ПР' });
+    }
+
+    const debtRes = await pool.query('SELECT * FROM debts WHERE id=$1', [req.params.id]);
+    if (debtRes.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    const debt = debtRes.rows[0];
+
+    const now = new Date().toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+    if (status === 'approved') {
+      // Одобрено → удаляем долг
+      await pool.query('DELETE FROM debts WHERE id=$1', [req.params.id]);
+
+      await pool.query(
+        `INSERT INTO messages (id, from_phone, from_name, from_avatar, from_status, text, time, date)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [
+          Date.now() + Math.floor(Math.random() * 100000),
+          'system',
+          '📝 Апелляция одобрена',
+          null,
+          'БОТ',
+          `✅ ${debt.debtor_name} — долг ${debt.amount}₮ снят (апелляция одобрена)`,
+          new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }),
+          new Date().toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })
+        ]
+      );
+    } else {
+      // Отклонено → оставляем долг, записываем комментарий
+      await pool.query(
+        `UPDATE debts SET
+          appeal_status='rejected',
+          appeal_pr_comment=$1,
+          appeal_resolved_at=$2,
+          appeal_resolved_by=$3
+         WHERE id=$4`,
+        [prComment || null, now, resolvedBy || null, req.params.id]
+      );
+
+      await pool.query(
+        `INSERT INTO messages (id, from_phone, from_name, from_avatar, from_status, text, time, date)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [
+          Date.now() + Math.floor(Math.random() * 100000),
+          'system',
+          '📝 Апелляция отклонена',
+          null,
+          'БОТ',
+          `❌ ${debt.debtor_name} — апелляция на долг ${debt.amount}₮ отклонена. ${prComment || ''}`,
+          new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }),
+          new Date().toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })
+        ]
+      );
+    }
+
+    res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
