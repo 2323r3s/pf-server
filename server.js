@@ -391,6 +391,17 @@ const initDB = async () => {
       )
     `);
 
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS achievements (
+        id BIGINT PRIMARY KEY,
+        phone TEXT NOT NULL,
+        achievement_id TEXT NOT NULL,
+        granted_at TIMESTAMP DEFAULT NOW(),
+        granted_by TEXT,
+        UNIQUE (phone, achievement_id)
+      )
+    `);
+
     // ═══ ЖУРНАЛ СБРОСОВ ПАРОЛЯ ═══
     await pool.query(`
       CREATE TABLE IF NOT EXISTS password_resets (
@@ -404,6 +415,8 @@ const initDB = async () => {
     `);
 
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMP DEFAULT NOW()`);
+
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS bio TEXT`);
 
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_tax_paid_at TIMESTAMP`);
 
@@ -443,6 +456,29 @@ app.post('/api/users/tax_paid', async (req, res) => {
     if (!phone) return res.status(400).json({ error: 'Bad params' });
     await pool.query('UPDATE users SET last_tax_paid_at=NOW() WHERE phone=$1', [phone]);
     res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ═══════════════════════════════════════════════════════
+// РЕЙТИНГ
+// ═══════════════════════════════════════════════════════
+app.get('/api/leaderboard', async (req, res) => {
+  try {
+    const r = await pool.query(`
+      SELECT phone, first_name, last_name, status, aura, tonki, avatar
+      FROM users
+      WHERE status <> 'ПР'
+      ORDER BY aura DESC
+    `);
+    res.json(r.rows.map(u => ({
+      phone: u.phone,
+      firstName: u.first_name,
+      lastName: u.last_name,
+      status: u.status,
+      aura: u.aura,
+      tonki: u.tonki,
+      avatar: u.avatar,
+    })));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
