@@ -7,7 +7,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -17,6 +17,9 @@ pool.query('SELECT NOW()')
   .then(() => console.log('✅ PostgreSQL подключён'))
   .catch(err => console.error('❌ PostgreSQL ошибка:', err.stack || err.message));
 
+// ═══════════════════════════════════════════════════════
+// ИНИЦИАЛИЗАЦИЯ БД
+// ═══════════════════════════════════════════════════════
 const initDB = async () => {
   try {
     await pool.query(`
@@ -43,6 +46,8 @@ const initDB = async () => {
         has_created_party BOOLEAN DEFAULT false
       )
     `);
+
+    // ═══ ALTER для users ═══
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS has_pension BOOLEAN DEFAULT false`);
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS has_insurance BOOLEAN DEFAULT false`);
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS insurance_until TIMESTAMP`);
@@ -58,7 +63,19 @@ const initDB = async () => {
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_vacation_year INTEGER`);
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_burmaldeem_month TEXT`);
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS bio TEXT`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS pension_started_at TIMESTAMP`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS top1_streak INTEGER DEFAULT 0`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_top1_check TEXT`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_rich_reward BOOLEAN DEFAULT false`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_pensioner_reward BOOLEAN DEFAULT false`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_auto_inactive_at TIMESTAMP`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_auto_tax_at TIMESTAMP`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_auto_idle_at TIMESTAMP`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_auto_credit_at TIMESTAMP`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_auto_debtor_at TIMESTAMP`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS farm_aura_applied BOOLEAN DEFAULT false`);
 
+    // ═══ NEWS ═══
     await pool.query(`
       CREATE TABLE IF NOT EXISTS news (
         id BIGINT PRIMARY KEY,
@@ -68,6 +85,7 @@ const initDB = async () => {
       )
     `);
 
+    // ═══ BANK ═══
     await pool.query(`
       CREATE TABLE IF NOT EXISTS bank (
         phone TEXT PRIMARY KEY,
@@ -87,6 +105,7 @@ const initDB = async () => {
       )
     `);
 
+    // ═══ FINES ═══
     await pool.query(`
       CREATE TABLE IF NOT EXISTS fines (
         id BIGINT PRIMARY KEY, phone TEXT NOT NULL, reason TEXT NOT NULL, amount INTEGER NOT NULL,
@@ -94,6 +113,7 @@ const initDB = async () => {
       )
     `);
 
+    // ═══ FRIENDS ═══
     await pool.query(`
       CREATE TABLE IF NOT EXISTS friends (
         user_phone TEXT NOT NULL, friend_phone TEXT NOT NULL, type TEXT NOT NULL,
@@ -101,6 +121,7 @@ const initDB = async () => {
       )
     `);
 
+    // ═══ MESSAGES ═══
     await pool.query(`
       CREATE TABLE IF NOT EXISTS messages (
         id BIGINT PRIMARY KEY, from_phone TEXT NOT NULL, from_name TEXT NOT NULL,
@@ -115,9 +136,11 @@ const initDB = async () => {
       )
     `);
 
+    // ═══ DOCS ═══
     await pool.query(`CREATE TABLE IF NOT EXISTS docs (key TEXT PRIMARY KEY, content TEXT NOT NULL)`);
     await pool.query(`CREATE TABLE IF NOT EXISTS chronicle (id INTEGER PRIMARY KEY DEFAULT 1, content TEXT)`);
 
+    // ═══ RATE ═══
     await pool.query(`
       CREATE TABLE IF NOT EXISTS rate (
         id INTEGER PRIMARY KEY DEFAULT 1,
@@ -143,14 +166,15 @@ const initDB = async () => {
       )
     `);
 
+    // ═══ BANK PF ═══
     await pool.query(`
       CREATE TABLE IF NOT EXISTS bank_pf (
         id INTEGER PRIMARY KEY DEFAULT 1, amount BIGINT NOT NULL DEFAULT 3124000000000
       )
     `);
-
     await pool.query(`INSERT INTO bank_pf (id, amount) VALUES (1, 3124000000000) ON CONFLICT (id) DO NOTHING`);
 
+    // ═══ APPEALS ═══
     await pool.query(`
       CREATE TABLE IF NOT EXISTS appeals (
         id BIGINT PRIMARY KEY,
@@ -166,6 +190,7 @@ const initDB = async () => {
       )
     `);
 
+    // ═══ DOC REQUESTS ═══
     await pool.query(`
       CREATE TABLE IF NOT EXISTS doc_requests (
         id BIGINT PRIMARY KEY,
@@ -180,6 +205,7 @@ const initDB = async () => {
       )
     `);
 
+    // ═══ AURA HISTORY ═══
     await pool.query(`
       CREATE TABLE IF NOT EXISTS aura_history (
         id BIGINT PRIMARY KEY,
@@ -190,6 +216,7 @@ const initDB = async () => {
       )
     `);
 
+    // ═══ SALARY PAID ═══
     await pool.query(`
       CREATE TABLE IF NOT EXISTS salary_paid (
         phone TEXT PRIMARY KEY,
@@ -197,6 +224,7 @@ const initDB = async () => {
       )
     `);
 
+    // ═══ ELECTIONS ═══
     await pool.query(`
       CREATE TABLE IF NOT EXISTS elections (
         id INTEGER PRIMARY KEY DEFAULT 1,
@@ -229,6 +257,7 @@ const initDB = async () => {
       )
     `);
 
+    // ═══ CASINO ═══
     await pool.query(`
       CREATE TABLE IF NOT EXISTS casino_history (
         id BIGINT PRIMARY KEY,
@@ -257,6 +286,7 @@ const initDB = async () => {
       )
     `);
 
+    // ═══ CREDITS ═══
     await pool.query(`
       CREATE TABLE IF NOT EXISTS credit_requests (
         id BIGINT PRIMARY KEY,
@@ -289,6 +319,7 @@ const initDB = async () => {
       )
     `);
 
+    // ═══ PROFESSIONS ═══
     await pool.query(`
       CREATE TABLE IF NOT EXISTS professions (
         phone TEXT NOT NULL,
@@ -325,6 +356,7 @@ const initDB = async () => {
       )
     `);
 
+    // ═══ PARTIES ═══
     await pool.query(`
       CREATE TABLE IF NOT EXISTS parties (
         id BIGINT PRIMARY KEY,
@@ -378,6 +410,16 @@ const initDB = async () => {
     `);
 
     await pool.query(`
+      CREATE TABLE IF NOT EXISTS party_wins (
+        party_id BIGINT PRIMARY KEY,
+        wins INTEGER DEFAULT 0,
+        last_win_at TIMESTAMP,
+        reward_granted BOOLEAN DEFAULT false
+      )
+    `);
+
+    // ═══ PASSWORD RESETS ═══
+    await pool.query(`
       CREATE TABLE IF NOT EXISTS password_resets (
         id BIGINT PRIMARY KEY,
         user_phone TEXT NOT NULL,
@@ -388,6 +430,7 @@ const initDB = async () => {
       )
     `);
 
+    // ═══ DEBTS ═══
     await pool.query(`
       CREATE TABLE IF NOT EXISTS debts (
         id BIGINT PRIMARY KEY,
@@ -404,7 +447,15 @@ const initDB = async () => {
         created_by TEXT
       )
     `);
+    await pool.query(`ALTER TABLE debts ADD COLUMN IF NOT EXISTS is_government BOOLEAN DEFAULT false`);
+    await pool.query(`ALTER TABLE debts ADD COLUMN IF NOT EXISTS appeal_status TEXT`);
+    await pool.query(`ALTER TABLE debts ADD COLUMN IF NOT EXISTS appeal_reason TEXT`);
+    await pool.query(`ALTER TABLE debts ADD COLUMN IF NOT EXISTS appeal_pr_comment TEXT`);
+    await pool.query(`ALTER TABLE debts ADD COLUMN IF NOT EXISTS appeal_created_at TEXT`);
+    await pool.query(`ALTER TABLE debts ADD COLUMN IF NOT EXISTS appeal_resolved_at TEXT`);
+    await pool.query(`ALTER TABLE debts ADD COLUMN IF NOT EXISTS appeal_resolved_by TEXT`);
 
+    // ═══ ACHIEVEMENTS ═══
     await pool.query(`
       CREATE TABLE IF NOT EXISTS achievements (
         id BIGINT PRIMARY KEY,
@@ -416,9 +467,7 @@ const initDB = async () => {
       )
     `);
 
-        // ═══ МЕССЕНДЖЕР 2.0 ═══
-    
-    // Реакции на любые сообщения (общий / личный / групповой / партийный)
+    // ═══ MESSAGE REACTIONS ═══
     await pool.query(`
       CREATE TABLE IF NOT EXISTS message_reactions (
         id BIGINT PRIMARY KEY,
@@ -433,15 +482,23 @@ const initDB = async () => {
     `);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_reactions_msg ON message_reactions (message_id, chat_type)`);
 
-    // Reply для сообщений (добавляем колонку в существующие таблицы)
+    // ═══ REPLY + VOICE ═══
     await pool.query(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to BIGINT`);
+    await pool.query(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS voice TEXT`);
+    await pool.query(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS voice_duration INTEGER`);
+
     await pool.query(`ALTER TABLE private_messages ADD COLUMN IF NOT EXISTS reply_to BIGINT`);
     await pool.query(`ALTER TABLE private_messages ADD COLUMN IF NOT EXISTS date TEXT`);
+    await pool.query(`ALTER TABLE private_messages ADD COLUMN IF NOT EXISTS voice TEXT`);
+    await pool.query(`ALTER TABLE private_messages ADD COLUMN IF NOT EXISTS voice_duration INTEGER`);
+
     await pool.query(`ALTER TABLE party_messages ADD COLUMN IF NOT EXISTS reply_to BIGINT`);
     await pool.query(`ALTER TABLE party_messages ADD COLUMN IF NOT EXISTS from_avatar TEXT`);
     await pool.query(`ALTER TABLE party_messages ADD COLUMN IF NOT EXISTS date TEXT`);
+    await pool.query(`ALTER TABLE party_messages ADD COLUMN IF NOT EXISTS voice TEXT`);
+    await pool.query(`ALTER TABLE party_messages ADD COLUMN IF NOT EXISTS voice_duration INTEGER`);
 
-    // Группы
+    // ═══ GROUPS ═══
     await pool.query(`
       CREATE TABLE IF NOT EXISTS group_chats (
         id BIGINT PRIMARY KEY,
@@ -475,18 +532,10 @@ const initDB = async () => {
         date TEXT
       )
     `);
+    await pool.query(`ALTER TABLE group_messages ADD COLUMN IF NOT EXISTS voice TEXT`);
+    await pool.query(`ALTER TABLE group_messages ADD COLUMN IF NOT EXISTS voice_duration INTEGER`);
 
-        // ═══ СЧЁТЧИК ПОБЕД ПАРТИЙ (п. 5.9) ═══
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS party_wins (
-        party_id BIGINT PRIMARY KEY,
-        wins INTEGER DEFAULT 0,
-        last_win_at TIMESTAMP,
-        reward_granted BOOLEAN DEFAULT false
-      )
-    `);
-
-    // Настройки чата — для каждого ЖИ свои (clear / delete / block)
+    // ═══ CHAT SETTINGS ═══
     await pool.query(`
       CREATE TABLE IF NOT EXISTS chat_settings (
         phone TEXT NOT NULL,
@@ -500,37 +549,21 @@ const initDB = async () => {
       )
     `);
 
-    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS pension_started_at TIMESTAMP`);
-    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS top1_streak INTEGER DEFAULT 0`);
-    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_top1_check TEXT`);
-    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_rich_reward BOOLEAN DEFAULT false`);
-    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_pensioner_reward BOOLEAN DEFAULT false`);
-    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_auto_inactive_at TIMESTAMP`);
-    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_auto_tax_at TIMESTAMP`);
-    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_auto_idle_at TIMESTAMP`);
-    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_auto_credit_at TIMESTAMP`);
-    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_auto_debtor_at TIMESTAMP`);
-
-        // ═══ ГОЛОСОВЫЕ СООБЩЕНИЯ ═══
-    await pool.query(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS voice TEXT`);
-    await pool.query(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS voice_duration INTEGER`);
-    await pool.query(`ALTER TABLE private_messages ADD COLUMN IF NOT EXISTS voice TEXT`);
-    await pool.query(`ALTER TABLE private_messages ADD COLUMN IF NOT EXISTS voice_duration INTEGER`);
-    await pool.query(`ALTER TABLE group_messages ADD COLUMN IF NOT EXISTS voice TEXT`);
-    await pool.query(`ALTER TABLE group_messages ADD COLUMN IF NOT EXISTS voice_duration INTEGER`);
-    await pool.query(`ALTER TABLE party_messages ADD COLUMN IF NOT EXISTS voice TEXT`);
-    await pool.query(`ALTER TABLE party_messages ADD COLUMN IF NOT EXISTS voice_duration INTEGER`);
-
-        // ═══ РАСШИРЕНИЕ ДОЛГОВ ═══
-    await pool.query(`ALTER TABLE debts ADD COLUMN IF NOT EXISTS is_government BOOLEAN DEFAULT false`);
-    await pool.query(`ALTER TABLE debts ADD COLUMN IF NOT EXISTS appeal_status TEXT`);
-    await pool.query(`ALTER TABLE debts ADD COLUMN IF NOT EXISTS appeal_reason TEXT`);
-    await pool.query(`ALTER TABLE debts ADD COLUMN IF NOT EXISTS appeal_pr_comment TEXT`);
-    await pool.query(`ALTER TABLE debts ADD COLUMN IF NOT EXISTS appeal_created_at TEXT`);
-    await pool.query(`ALTER TABLE debts ADD COLUMN IF NOT EXISTS appeal_resolved_at TEXT`);
-    await pool.query(`ALTER TABLE debts ADD COLUMN IF NOT EXISTS appeal_resolved_by TEXT`);
-
-    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS farm_aura_applied BOOLEAN DEFAULT false`);
+    // ═══ NOTIFICATIONS ═══
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS notifications (
+        id BIGINT PRIMARY KEY,
+        phone TEXT NOT NULL,
+        type TEXT NOT NULL,
+        title TEXT NOT NULL,
+        text TEXT,
+        target TEXT,
+        target_id TEXT,
+        read BOOLEAN DEFAULT false,
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_notif_phone ON notifications (phone, created_at DESC)`);
 
     console.log('✅ Таблицы готовы');
   } catch (err) {
@@ -544,6 +577,23 @@ app.get('/', (req, res) => {
   res.send('🏚️ Подвальная Федерация — сервер работает (PostgreSQL)!');
 });
 
+// ═══════════════════════════════════════════════════════
+// УВЕДОМЛЕНИЯ (помощник)
+// ═══════════════════════════════════════════════════════
+const createNotification = async (phone, type, title, text, target, targetId) => {
+  try {
+    if (!phone) return;
+    await pool.query(
+      `INSERT INTO notifications (id, phone, type, title, text, target, target_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [Date.now() + Math.floor(Math.random() * 1000), phone, type, title, text || null, target || null, targetId || null]
+    );
+  } catch (err) { console.error('createNotification:', err.message); }
+};
+
+// ═══════════════════════════════════════════════════════
+// HEARTBEAT / TAX PAID
+// ═══════════════════════════════════════════════════════
 app.post('/api/users/heartbeat', async (req, res) => {
   try {
     const { phone } = req.body;
@@ -576,13 +626,15 @@ app.post('/api/users', async (req, res) => {
   try {
     const u = req.body;
 
+    // ═══ ПР всегда с 10000 тонков ═══
+    if (u.status === 'ПР') {
+      u.tonki = 10000;
+    }
+
     let demoted = false;
     if (u.status === 'ПМ' && (u.aura || 0) < 9800) {
       u.status = 'ЖИ';
       demoted = true;
-    if (u.status === 'ПР') {
-      u.tonki = 10000;
-    }
     }
 
     if (u.status === 'ЗМ') {
@@ -624,7 +676,7 @@ app.post('/api/users', async (req, res) => {
           u.phone,
           0,
           '⚠️ Понижение ПМ → ЖИ (аура упала ниже 9800, п. 2.5)',
-          new Date().toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+          new Date().toLocaleString('ru-RU')
         ]
       );
     }
@@ -676,12 +728,42 @@ app.post('/api/users/bonus_aura', async (req, res) => {
           phone,
           0,
           '⚠️ Понижение ПМ → ЖИ (аура упала ниже 9800, п. 2.5)',
-          new Date().toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+          new Date().toLocaleString('ru-RU')
         ]
       );
     }
 
     res.json({ ok: true, newAura, status: finalStatus, demoted });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/users/gift_reward', async (req, res) => {
+  try {
+    const { phone, giverName } = req.body;
+    if (!phone) return res.status(400).json({ error: 'Bad params' });
+
+    const uRes = await pool.query('SELECT * FROM users WHERE phone=$1', [phone]);
+    if (uRes.rows.length === 0) return res.status(404).json({ error: 'User not found' });
+    const u = uRes.rows[0];
+
+    if (u.status === 'ПР') return res.status(400).json({ error: 'ПР не получает ауру' });
+
+    const newAura = (u.aura || 0) + 1000;
+    await pool.query('UPDATE users SET aura=$1 WHERE phone=$2', [newAura, phone]);
+
+    await pool.query(
+      `INSERT INTO aura_history (id, phone, delta, reason, date)
+       VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO NOTHING`,
+      [
+        Date.now() + Math.floor(Math.random() * 1000),
+        phone,
+        1000,
+        `🎁 Подарки (п. 5.10) — хороший подарок ПР (${giverName || 'ПР'})`,
+        new Date().toLocaleString('ru-RU')
+      ]
+    );
+
+    res.json({ ok: true, newAura });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -790,7 +872,7 @@ app.get('/api/password_resets', async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════
-// ВЫСЕЛЕНИЕ / ШТАММ / ПРОЩЕНИЕ
+// ВЫСЕЛЕНИЕ / ШТАММ
 // ═══════════════════════════════════════════════════════
 app.post('/api/admin/ban', async (req, res) => {
   try {
@@ -800,6 +882,7 @@ app.post('/api/admin/ban', async (req, res) => {
       `UPDATE users SET is_banned=true, ban_reason=$1, ban_type='permanent', stamp_until=NULL WHERE phone=$2`,
       [reason, phone]
     );
+    await createNotification(phone, 'system', '🚫 Вы выселены', reason, null, null);
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -812,6 +895,7 @@ app.post('/api/admin/forgive_ban', async (req, res) => {
       `UPDATE users SET is_banned=true, ban_reason=$1, ban_type='forgiving', stamp_until=NULL WHERE phone=$2`,
       [reason, phone]
     );
+    await createNotification(phone, 'system', '🕊️ Простительное выселение', reason, null, null);
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -824,6 +908,7 @@ app.post('/api/admin/stamp', async (req, res) => {
       `UPDATE users SET is_banned=false, ban_reason=$1, ban_type='stamp', stamp_until=$2 WHERE phone=$3`,
       [reason, until, phone]
     );
+    await createNotification(phone, 'system', '⏰ Штамм назначен', reason, null, null);
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -846,6 +931,7 @@ app.post('/api/admin/pardon', async (req, res) => {
       `UPDATE users SET is_banned=false, ban_reason=NULL, ban_type=NULL, stamp_until=NULL WHERE phone=$1`,
       [phone]
     );
+    await createNotification(phone, 'system', '🕊️ Вас помиловали', 'Добро пожаловать обратно в подвал!', null, null);
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -951,6 +1037,8 @@ app.post('/api/professions/pay_salary', async (req, res) => {
       [Date.now(), phone, profession, amount, paidBy || 'ПР']
     );
 
+    await createNotification(phone, 'reward', '💵 Зарплата', `+${amount}₮ за ${profession}`, 'salary', null);
+
     res.json({ ok: true, amount });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -1007,6 +1095,8 @@ app.post('/api/status_salary/pay', async (req, res) => {
       ]
     );
 
+    await createNotification(phone, 'reward', `💰 ${reason}`, `+${amount}₮`, 'salary', null);
+
     res.json({ ok: true, amount });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -1032,6 +1122,21 @@ app.post('/api/profession_requests', async (req, res) => {
       [a.id, a.userPhone, a.userName, a.profession, a.status || 'pending', a.createdAt,
        a.prComment || null, a.resolvedAt || null, a.resolvedBy || null]
     );
+
+    if (a.status === 'pending') {
+      const prRes = await pool.query("SELECT phone FROM users WHERE status='ПР' LIMIT 1");
+      if (prRes.rows.length > 0) {
+        await createNotification(
+          prRes.rows[0].phone,
+          'request',
+          `💼 Заявка на профессию`,
+          `${a.userName}: ${a.profession}`,
+          'profession_requests',
+          null
+        );
+      }
+    }
+
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -1068,6 +1173,24 @@ app.post('/api/profession_requests/:id/resolve', async (req, res) => {
           await pool.query('UPDATE bank_pf SET amount=amount+$1 WHERE id=1', [price]);
         }
       }
+
+      await createNotification(
+        request.user_phone,
+        'system',
+        '✅ Заявка на профессию одобрена',
+        prComment || 'Добро пожаловать на работу!',
+        'professions',
+        null
+      );
+    } else if (status === 'rejected') {
+      await createNotification(
+        request.user_phone,
+        'system',
+        '❌ Заявка на профессию отклонена',
+        prComment || 'Без причины',
+        'professions',
+        null
+      );
     }
 
     res.json({ ok: true });
@@ -1107,6 +1230,21 @@ app.post('/api/credit_requests', async (req, res) => {
        a.status || 'pending', a.createdAt,
        a.prComment || null, a.resolvedAt || null, a.resolvedBy || null]
     );
+
+    if (a.status === 'pending') {
+      const prRes = await pool.query("SELECT phone FROM users WHERE status='ПР' LIMIT 1");
+      if (prRes.rows.length > 0) {
+        await createNotification(
+          prRes.rows[0].phone,
+          'request',
+          `💳 Заявка на кредит: ${a.amount}₮`,
+          `${a.userName}: ${a.reason}`,
+          'credit_requests',
+          null
+        );
+      }
+    }
+
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -1135,6 +1273,24 @@ app.post('/api/credit_requests/:id/resolve', async (req, res) => {
         `INSERT INTO credits (id, user_phone, amount, total_due, reason, months, due_date, status, created_at)
          VALUES ($1,$2,$3,$4,$5,$6,$7,'active',NOW())`,
         [Date.now(), request.user_phone, request.amount, totalDue, request.reason, request.months, dueDate.toISOString()]
+      );
+
+      await createNotification(
+        request.user_phone,
+        'reward',
+        `✅ Кредит одобрен: ${request.amount}₮`,
+        `К возврату: ${totalDue}₮ за ${request.months} мес.`,
+        'bank',
+        null
+      );
+    } else if (status === 'rejected') {
+      await createNotification(
+        request.user_phone,
+        'system',
+        '❌ Кредит отклонён',
+        prComment || 'Без причины',
+        'bank',
+        null
       );
     }
 
@@ -1204,351 +1360,6 @@ app.post('/api/credits/:id/pay', async (req, res) => {
     }
 
     res.json({ ok: true, paid: newPaid, remaining: credit.total_due - newPaid, closed: newStatus === 'paid' });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// ═══════════════════════════════════════════════════════
-// ЛИЧНЫЕ СООБЩЕНИЯ
-// ═══════════════════════════════════════════════════════
-app.get('/api/private/:chatId', async (req, res) => {
-  try {
-    const r = await pool.query(
-      'SELECT * FROM private_messages WHERE chat_id=$1 ORDER BY id ASC',
-      [req.params.chatId]
-    );
-    res.json(r.rows.map(m => ({
-      id: m.id, chatId: m.chat_id,
-      from: m.from_phone, fromName: m.from_name,
-      text: m.text, replyTo: m.reply_to,
-      voice: m.voice, voiceDuration: m.voice_duration,
-      time: m.time, date: m.date,
-    })));
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.post('/api/private', async (req, res) => {
-  try {
-    const m = req.body;
-    await pool.query(
-      `INSERT INTO private_messages (id, chat_id, from_phone, from_name, text, reply_to, voice, voice_duration, time, date)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (id) DO NOTHING`,
-      [m.id, m.chatId, m.from, m.fromName, m.text || '', m.replyTo || null, m.voice || null, m.voiceDuration || null, m.time, m.date || null]
-    );
-    res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// Общий чат — добавить reply_to и avatar
-app.get('/api/messages', async (req, res) => {
-  try {
-    const r = await pool.query('SELECT * FROM messages ORDER BY id ASC LIMIT 200');
-    res.json(r.rows.map(m => ({
-      id: m.id, from: m.from_phone, fromName: m.from_name,
-      fromAvatar: m.from_avatar, fromStatus: m.from_status,
-      text: m.text, replyTo: m.reply_to, time: m.time, date: m.date,
-    })));
-      res.json(r.rows.map(m => ({
-      id: m.id, from: m.from_phone, fromName: m.from_name,
-      fromAvatar: m.from_avatar, fromStatus: m.from_status,
-      text: m.text, replyTo: m.reply_to, 
-      voice: m.voice, voiceDuration: m.voice_duration,
-      time: m.time, date: m.date,
-    })));
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.post('/api/messages', async (req, res) => {
-  try {
-    const m = req.body;
-    await pool.query(
-      `INSERT INTO messages (id, from_phone, from_name, from_avatar, from_status, text, reply_to, voice, voice_duration, time, date)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT (id) DO NOTHING`,
-      [m.id, m.from, m.fromName, m.fromAvatar, m.fromStatus, m.text || '', m.replyTo || null, m.voice || null, m.voiceDuration || null, m.time, m.date]
-    );
-    res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// ═══════════════════════════════════════════════════════
-// РЕАКЦИИ
-// ═══════════════════════════════════════════════════════
-app.get('/api/reactions', async (req, res) => {
-  try {
-    const { chat_type, chat_id, message_ids } = req.query;
-    if (!chat_type || !message_ids) return res.json([]);
-    const ids = message_ids.split(',').map(x => parseInt(x)).filter(x => !isNaN(x));
-    if (ids.length === 0) return res.json([]);
-
-    let q = `SELECT * FROM message_reactions WHERE chat_type=$1 AND message_id = ANY($2::bigint[])`;
-    let params = [chat_type, ids];
-    if (chat_id) {
-      q += ` AND chat_id=$3`;
-      params.push(chat_id);
-    }
-    const r = await pool.query(q, params);
-    res.json(r.rows.map(x => ({
-      id: x.id, messageId: x.message_id, chatType: x.chat_type, chatId: x.chat_id,
-      fromPhone: x.from_phone, fromName: x.from_name, emoji: x.emoji,
-    })));
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.post('/api/reactions/toggle', async (req, res) => {
-  try {
-    const { messageId, chatType, chatId, fromPhone, fromName, emoji } = req.body;
-    if (!messageId || !chatType || !fromPhone || !emoji) {
-      return res.status(400).json({ error: 'Bad params' });
-    }
-
-    // Есть ли уже такая?
-    const existing = await pool.query(
-      `SELECT id FROM message_reactions 
-       WHERE message_id=$1 AND chat_type=$2 AND COALESCE(chat_id,'')=COALESCE($3,'') 
-       AND from_phone=$4 AND emoji=$5`,
-      [messageId, chatType, chatId || null, fromPhone, emoji]
-    );
-
-    if (existing.rows.length > 0) {
-      // Убираем
-      await pool.query('DELETE FROM message_reactions WHERE id=$1', [existing.rows[0].id]);
-      return res.json({ ok: true, action: 'removed' });
-    }
-
-    // Добавляем
-    await pool.query(
-      `INSERT INTO message_reactions (id, message_id, chat_type, chat_id, from_phone, from_name, emoji)
-       VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-      [Date.now() + Math.floor(Math.random() * 1000), messageId, chatType, chatId || null, fromPhone, fromName, emoji]
-    );
-    res.json({ ok: true, action: 'added' });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// ═══════════════════════════════════════════════════════
-// ГРУППЫ
-// ═══════════════════════════════════════════════════════
-app.get('/api/groups', async (req, res) => {
-  try {
-    const r = await pool.query('SELECT * FROM group_chats ORDER BY created_at DESC');
-    const groups = [];
-    for (const g of r.rows) {
-      const members = await pool.query(
-        'SELECT phone, name FROM group_members WHERE group_id=$1',
-        [g.id]
-      );
-      groups.push({
-        id: g.id,
-        name: g.name,
-        avatar: g.avatar,
-        creatorPhone: g.creator_phone,
-        createdAt: g.created_at,
-        members: members.rows.map(m => ({ phone: m.phone, name: m.name })),
-      });
-    }
-    res.json(groups);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.post('/api/groups', async (req, res) => {
-  try {
-    const { name, creatorPhone, creatorName, members } = req.body;
-    if (!name || !creatorPhone || !members || members.length < 1) {
-      return res.status(400).json({ error: 'Bad params' });
-    }
-    if (members.length > 20) return res.status(400).json({ error: 'Максимум 20 участников' });
-
-    const id = Date.now();
-    await pool.query(
-      `INSERT INTO group_chats (id, name, creator_phone) VALUES ($1,$2,$3)`,
-      [id, name, creatorPhone]
-    );
-
-    // Добавляем создателя
-    await pool.query(
-      `INSERT INTO group_members (group_id, phone, name) VALUES ($1,$2,$3)`,
-      [id, creatorPhone, creatorName]
-    );
-
-    // Добавляем всех участников
-    for (const m of members) {
-      if (m.phone === creatorPhone) continue;
-      await pool.query(
-        `INSERT INTO group_members (group_id, phone, name) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`,
-        [id, m.phone, m.name]
-      );
-    }
-
-    res.json({ ok: true, groupId: id });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.post('/api/groups/:id/rename', async (req, res) => {
-  try {
-    const { userPhone, name } = req.body;
-    const g = await pool.query('SELECT * FROM group_chats WHERE id=$1', [req.params.id]);
-    if (g.rows.length === 0) return res.status(404).json({ error: 'Not found' });
-    if (g.rows[0].creator_phone !== userPhone) return res.status(403).json({ error: 'Только создатель' });
-
-    await pool.query('UPDATE group_chats SET name=$1 WHERE id=$2', [name, req.params.id]);
-    res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.post('/api/groups/:id/avatar', async (req, res) => {
-  try {
-    const { userPhone, avatar } = req.body;
-    const g = await pool.query('SELECT * FROM group_chats WHERE id=$1', [req.params.id]);
-    if (g.rows.length === 0) return res.status(404).json({ error: 'Not found' });
-    if (g.rows[0].creator_phone !== userPhone) return res.status(403).json({ error: 'Только создатель' });
-
-    await pool.query('UPDATE group_chats SET avatar=$1 WHERE id=$2', [avatar || null, req.params.id]);
-    res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.post('/api/groups/:id/members/add', async (req, res) => {
-  try {
-    const { userPhone, memberPhone, memberName } = req.body;
-    const g = await pool.query('SELECT * FROM group_chats WHERE id=$1', [req.params.id]);
-    if (g.rows.length === 0) return res.status(404).json({ error: 'Not found' });
-    if (g.rows[0].creator_phone !== userPhone) return res.status(403).json({ error: 'Только создатель' });
-
-    const cnt = await pool.query('SELECT COUNT(*) FROM group_members WHERE group_id=$1', [req.params.id]);
-    if (parseInt(cnt.rows[0].count) >= 20) return res.status(400).json({ error: 'Группа заполнена (20)' });
-
-    await pool.query(
-      'INSERT INTO group_members (group_id, phone, name) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING',
-      [req.params.id, memberPhone, memberName]
-    );
-    res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.delete('/api/groups/:id/members/:phone', async (req, res) => {
-  try {
-    const { userPhone } = req.body;
-    const g = await pool.query('SELECT * FROM group_chats WHERE id=$1', [req.params.id]);
-    if (g.rows.length === 0) return res.status(404).json({ error: 'Not found' });
-
-    const isCreator = g.rows[0].creator_phone === userPhone;
-    const isSelf = userPhone === req.params.phone;
-    if (!isCreator && !isSelf) return res.status(403).json({ error: 'Нет прав' });
-    if (req.params.phone === g.rows[0].creator_phone) {
-      return res.status(400).json({ error: 'Создатель не может выйти. Удали группу.' });
-    }
-
-    await pool.query('DELETE FROM group_members WHERE group_id=$1 AND phone=$2',
-      [req.params.id, req.params.phone]);
-    res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.delete('/api/groups/:id', async (req, res) => {
-  try {
-    const { userPhone } = req.body;
-    const g = await pool.query('SELECT * FROM group_chats WHERE id=$1', [req.params.id]);
-    if (g.rows.length === 0) return res.status(404).json({ error: 'Not found' });
-    if (g.rows[0].creator_phone !== userPhone) return res.status(403).json({ error: 'Только создатель' });
-
-    await pool.query('DELETE FROM group_messages WHERE group_id=$1', [req.params.id]);
-    await pool.query('DELETE FROM group_members WHERE group_id=$1', [req.params.id]);
-    await pool.query('DELETE FROM group_chats WHERE id=$1', [req.params.id]);
-    res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.get('/api/group_messages/:groupId', async (req, res) => {
-  try {
-    const r = await pool.query(
-      'SELECT * FROM group_messages WHERE group_id=$1 ORDER BY id ASC LIMIT 200',
-      [req.params.groupId]
-    );
-    res.json(r.rows.map(m => ({
-      id: m.id, groupId: m.group_id,
-      from: m.from_phone, fromName: m.from_name, fromAvatar: m.from_avatar,
-      text: m.text, replyTo: m.reply_to,
-      voice: m.voice, voiceDuration: m.voice_duration,
-      time: m.time, date: m.date,
-    })));
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.post('/api/group_messages', async (req, res) => {
-  try {
-    const m = req.body;
-    await pool.query(
-      `INSERT INTO group_messages (id, group_id, from_phone, from_name, from_avatar, text, reply_to, voice, voice_duration, time, date)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT (id) DO NOTHING`,
-      [m.id, m.groupId, m.from, m.fromName, m.fromAvatar || null, m.text || '', m.replyTo || null, m.voice || null, m.voiceDuration || null, m.time, m.date || null]
-    );
-    res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// ═══════════════════════════════════════════════════════
-// НАСТРОЙКИ ЧАТА
-// ═══════════════════════════════════════════════════════
-app.get('/api/chat_settings/:phone', async (req, res) => {
-  try {
-    const r = await pool.query('SELECT * FROM chat_settings WHERE phone=$1', [req.params.phone]);
-    res.json(r.rows.map(x => ({
-      chatType: x.chat_type, chatId: x.chat_id,
-      clearedAt: x.cleared_at, deleted: x.deleted,
-      blocked: x.blocked, lastReadId: x.last_read_id,
-    })));
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.post('/api/chat_settings', async (req, res) => {
-  try {
-    const { phone, chatType, chatId, clearedAt, deleted, blocked, lastReadId } = req.body;
-    if (!phone || !chatType || !chatId) return res.status(400).json({ error: 'Bad params' });
-
-    await pool.query(
-      `INSERT INTO chat_settings (phone, chat_type, chat_id, cleared_at, deleted, blocked, last_read_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7)
-       ON CONFLICT (phone, chat_type, chat_id) DO UPDATE SET
-         cleared_at = COALESCE($4, chat_settings.cleared_at),
-         deleted = COALESCE($5, chat_settings.deleted),
-         blocked = COALESCE($6, chat_settings.blocked),
-         last_read_id = COALESCE($7, chat_settings.last_read_id)`,
-      [phone, chatType, chatId, clearedAt || null, deleted, blocked, lastReadId || null]
-    );
-    res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// Полная очистка личного чата (для обоих участников)
-app.post('/api/private/:chatId/clear', async (req, res) => {
-  try {
-    await pool.query('DELETE FROM private_messages WHERE chat_id=$1', [req.params.chatId]);
-    res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// Полная очистка группового чата (создатель)
-app.post('/api/group_messages/:groupId/clear', async (req, res) => {
-  try {
-    const { userPhone } = req.body;
-    const g = await pool.query('SELECT * FROM group_chats WHERE id=$1', [req.params.groupId]);
-    if (g.rows.length === 0) return res.status(404).json({ error: 'Not found' });
-    if (g.rows[0].creator_phone !== userPhone) return res.status(403).json({ error: 'Только создатель' });
-
-    await pool.query('DELETE FROM group_messages WHERE group_id=$1', [req.params.groupId]);
-    res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// Полная очистка общего чата (ПР)
-app.post('/api/messages/clear_all', async (req, res) => {
-  try {
-    const { userPhone } = req.body;
-    const u = await pool.query('SELECT status FROM users WHERE phone=$1', [userPhone]);
-    if (u.rows.length === 0 || u.rows[0].status !== 'ПР') {
-      return res.status(403).json({ error: 'Только ПР' });
-    }
-    await pool.query('DELETE FROM messages');
-    res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -1702,6 +1513,7 @@ app.post('/api/casino/permission', async (req, res) => {
        ON CONFLICT (phone) DO UPDATE SET granted_at=$2, granted_by=$3`,
       [phone, new Date().toISOString(), grantedBy || 'ПР']
     );
+    await createNotification(phone, 'system', '🎰 Разрешение на казино', 'Одобрено', 'casino', null);
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -1810,7 +1622,6 @@ app.post('/api/elections/finish', async (req, res) => {
     await pool.query('UPDATE users SET status=$1 WHERE status=$2 AND phone<>$3', ['ЖИ', 'ПВ', winnerPhone]);
     await pool.query('UPDATE users SET tonki = tonki + 100 WHERE phone=$1', [winnerPhone]);
 
-    // ═══ Победная партия (п. 5.6) + счётчик (п. 5.9) ═══
     let partyMembers = [];
     let partyId = null;
     try {
@@ -1819,12 +1630,9 @@ app.post('/api/elections/finish', async (req, res) => {
         [winnerPhone]
       );
       partyMembers = cRes.rows;
-      if (cRes.rows.length > 0) {
-        partyId = cRes.rows[0].party_id;
-      }
+      if (cRes.rows.length > 0) partyId = cRes.rows[0].party_id;
     } catch (e) { console.error('party bonus:', e.message); }
 
-    // +1000 ауры за победную партию (п. 5.6)
     for (const m of partyMembers) {
       await pool.query('UPDATE users SET aura = COALESCE(aura, 0) + 1000 WHERE phone=$1', [m.phone]);
       await pool.query(
@@ -1840,7 +1648,6 @@ app.post('/api/elections/finish', async (req, res) => {
       );
     }
 
-    // ═══ Счётчик побед партии (п. 5.9) ═══
     let finalWins = 0;
     let rewardGranted = false;
 
@@ -1866,7 +1673,6 @@ app.post('/api/elections/finish', async (req, res) => {
         );
       }
 
-      // ═══ 4 победы → +3000 ауры всем участникам (п. 5.9) ═══
       if (finalWins >= 4 && !alreadyRewarded) {
         rewardGranted = true;
         for (const m of partyMembers) {
@@ -1888,7 +1694,6 @@ app.post('/api/elections/finish', async (req, res) => {
           [partyId]
         );
 
-        // Сообщение в общий чат
         await pool.query(
           `INSERT INTO messages (id, from_phone, from_name, from_avatar, from_status, text, time, date)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
@@ -1907,6 +1712,20 @@ app.post('/api/elections/finish', async (req, res) => {
     }
 
     await pool.query('UPDATE elections SET finished=true, winner_phone=$1, winner_name=$2 WHERE id=1', [winnerPhone, winnerName]);
+
+    // Уведомить всех
+    const allUsers = await pool.query('SELECT phone FROM users');
+    for (const u of allUsers.rows) {
+      await createNotification(
+        u.phone,
+        'system',
+        '🏁 Выборы завершены',
+        `Победил: ${winnerName}`,
+        'elections',
+        null
+      );
+    }
+
     res.json({
       ok: true,
       winnerPhone,
@@ -1926,8 +1745,6 @@ app.delete('/api/elections', async (req, res) => {
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
-
-
 
 // ═══════════════════════════════════════════════════════
 // ЗАРПЛАТЫ
@@ -1992,6 +1809,19 @@ app.post('/api/news', async (req, res) => {
        ON CONFLICT (id) DO UPDATE SET title=$2, text=$3, urgent=$4, pinned=$5, edited=$6, date=$10`,
       [n.id, n.title, n.text, n.urgent, n.pinned, n.edited, n.author, n.authorStatus, n.authorAvatar, n.date]
     );
+
+    const users = await pool.query('SELECT phone FROM users');
+    for (const u of users.rows) {
+      await createNotification(
+        u.phone,
+        'news',
+        n.urgent ? `🔴 СРОЧНО: ${n.title}` : `📰 ${n.title}`,
+        (n.text || '').slice(0, 80),
+        'news',
+        null
+      );
+    }
+
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -2083,7 +1913,9 @@ app.get('/api/messages', async (req, res) => {
     res.json(r.rows.map(m => ({
       id: m.id, from: m.from_phone, fromName: m.from_name,
       fromAvatar: m.from_avatar, fromStatus: m.from_status,
-      text: m.text, time: m.time, date: m.date,
+      text: m.text, replyTo: m.reply_to,
+      voice: m.voice, voiceDuration: m.voice_duration,
+      time: m.time, date: m.date,
     })));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -2092,10 +1924,27 @@ app.post('/api/messages', async (req, res) => {
   try {
     const m = req.body;
     await pool.query(
-      `INSERT INTO messages (id, from_phone, from_name, from_avatar, from_status, text, time, date)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (id) DO NOTHING`,
-      [m.id, m.from, m.fromName, m.fromAvatar, m.fromStatus, m.text || '', m.time, m.date]
+      `INSERT INTO messages (id, from_phone, from_name, from_avatar, from_status, text, reply_to, voice, voice_duration, time, date)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT (id) DO NOTHING`,
+      [m.id, m.from, m.fromName, m.fromAvatar, m.fromStatus, m.text || '', m.replyTo || null, m.voice || null, m.voiceDuration || null, m.time, m.date]
     );
+
+    // Уведомления
+    if (m.from && m.from !== 'system' && !m.from.includes('БОТ')) {
+      const users = await pool.query('SELECT phone FROM users WHERE phone <> $1', [m.from]);
+      const preview = m.voice ? '🎤 Голосовое' : (m.text || '').slice(0, 60);
+      for (const u of users.rows) {
+        await createNotification(
+          u.phone,
+          'message',
+          `💬 ${m.fromName}`,
+          preview,
+          'general_chat',
+          null
+        );
+      }
+    }
+
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -2105,10 +1954,16 @@ app.post('/api/messages', async (req, res) => {
 // ═══════════════════════════════════════════════════════
 app.get('/api/private/:chatId', async (req, res) => {
   try {
-    const r = await pool.query('SELECT * FROM private_messages WHERE chat_id=$1 ORDER BY id ASC', [req.params.chatId]);
+    const r = await pool.query(
+      'SELECT * FROM private_messages WHERE chat_id=$1 ORDER BY id ASC',
+      [req.params.chatId]
+    );
     res.json(r.rows.map(m => ({
-      id: m.id, from: m.from_phone, fromName: m.from_name,
-      text: m.text, time: m.time,
+      id: m.id, chatId: m.chat_id,
+      from: m.from_phone, fromName: m.from_name,
+      text: m.text, replyTo: m.reply_to,
+      voice: m.voice, voiceDuration: m.voice_duration,
+      time: m.time, date: m.date,
     })));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -2117,10 +1972,35 @@ app.post('/api/private', async (req, res) => {
   try {
     const m = req.body;
     await pool.query(
-      `INSERT INTO private_messages (id, chat_id, from_phone, from_name, text, time)
-       VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (id) DO NOTHING`,
-      [m.id, m.chatId, m.from, m.fromName, m.text || '', m.time]
+      `INSERT INTO private_messages (id, chat_id, from_phone, from_name, text, reply_to, voice, voice_duration, time, date)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (id) DO NOTHING`,
+      [m.id, m.chatId, m.from, m.fromName, m.text || '', m.replyTo || null, m.voice || null, m.voiceDuration || null, m.time, m.date || null]
     );
+
+    // Уведомление получателю
+    if (m.chatId) {
+      const parts = m.chatId.split('__');
+      const recipient = parts.find(p => p !== m.from);
+      if (recipient) {
+        const preview = m.voice ? '🎤 Голосовое' : (m.text || '').slice(0, 60);
+        await createNotification(
+          recipient,
+          'message',
+          `💬 ${m.fromName}`,
+          preview,
+          'private_chat',
+          m.from
+        );
+      }
+    }
+
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/private/:chatId/clear', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM private_messages WHERE chat_id=$1', [req.params.chatId]);
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -2144,6 +2024,18 @@ app.post('/api/fines', async (req, res) => {
        ON CONFLICT (id) DO UPDATE SET paid=$8, paid_at=$9`,
       [f.id, f.phone, f.reason, f.amount, f.fromPhone, f.fromName, f.date, f.paid, f.paidAt || null]
     );
+
+    if (!f.paid) {
+      await createNotification(
+        f.phone,
+        'fine',
+        `⚠️ Новый штраф: ${f.amount}₮`,
+        f.reason,
+        'fines',
+        null
+      );
+    }
+
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -2177,6 +2069,23 @@ app.post('/api/friends', async (req, res) => {
       `INSERT INTO friends (user_phone, friend_phone, type) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`,
       [user_phone, friend_phone, type]
     );
+
+    if (type === 'outgoing') {
+      const uRes = await pool.query('SELECT first_name, last_name FROM users WHERE phone=$1', [user_phone]);
+      if (uRes.rows.length > 0) {
+        const name = `${uRes.rows[0].first_name} ${uRes.rows[0].last_name}`;
+        await createNotification(friend_phone, 'friend', '👥 Заявка в друзья', `${name} хочет добавить тебя`, 'friends', null);
+      }
+    }
+
+    if (type === 'friends') {
+      const uRes = await pool.query('SELECT first_name, last_name FROM users WHERE phone=$1', [user_phone]);
+      if (uRes.rows.length > 0) {
+        const name = `${uRes.rows[0].first_name} ${uRes.rows[0].last_name}`;
+        await createNotification(friend_phone, 'friend', '✅ Заявка принята', `${name} теперь у тебя в друзьях`, 'friends', null);
+      }
+    }
+
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -2216,7 +2125,7 @@ app.post('/api/docs', async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════
-// ЛЕТОПИСЬ ПФ
+// ЛЕТОПИСЬ
 // ═══════════════════════════════════════════════════════
 app.get('/api/chronicle', async (req, res) => {
   try {
@@ -2329,6 +2238,21 @@ app.post('/api/appeals', async (req, res) => {
        ON CONFLICT (id) DO UPDATE SET status=$6, pr_comment=$8, resolved_at=$9, resolved_by=$10`,
       [a.id, a.fineId, a.userPhone, a.userName, a.reason, a.status || 'pending', a.createdAt, a.prComment || null, a.resolvedAt || null, a.resolvedBy || null]
     );
+
+    if (a.status === 'pending') {
+      const prRes = await pool.query("SELECT phone FROM users WHERE status='ПР' LIMIT 1");
+      if (prRes.rows.length > 0) {
+        await createNotification(
+          prRes.rows[0].phone,
+          'appeal',
+          `📝 Апелляция на штраф`,
+          `${a.userName}: ${a.reason}`,
+          'appeals',
+          null
+        );
+      }
+    }
+
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -2352,41 +2276,25 @@ app.post('/api/appeals/:id/resolve', async (req, res) => {
     );
     if (status === 'approved') {
       await pool.query('DELETE FROM fines WHERE id=$1', [appeal.fine_id]);
+      await createNotification(
+        appeal.user_phone,
+        'system',
+        '✅ Апелляция одобрена',
+        prComment || 'Штраф снят',
+        'fines',
+        null
+      );
+    } else if (status === 'rejected') {
+      await createNotification(
+        appeal.user_phone,
+        'system',
+        '❌ Апелляция отклонена',
+        prComment || 'Без причины',
+        'fines',
+        null
+      );
     }
     res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// ═══════════════════════════════════════════════════════
-// 5.10 ПОДАРКИ — отдельный эндпоинт для трекинга
-// ═══════════════════════════════════════════════════════
-app.post('/api/users/gift_reward', async (req, res) => {
-  try {
-    const { phone, giverName } = req.body;
-    if (!phone) return res.status(400).json({ error: 'Bad params' });
-
-    const uRes = await pool.query('SELECT * FROM users WHERE phone=$1', [phone]);
-    if (uRes.rows.length === 0) return res.status(404).json({ error: 'User not found' });
-    const u = uRes.rows[0];
-
-    if (u.status === 'ПР') return res.status(400).json({ error: 'ПР не получает ауру' });
-
-    const newAura = (u.aura || 0) + 1000;
-    await pool.query('UPDATE users SET aura=$1 WHERE phone=$2', [newAura, phone]);
-
-    await pool.query(
-      `INSERT INTO aura_history (id, phone, delta, reason, date)
-       VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO NOTHING`,
-      [
-        Date.now() + Math.floor(Math.random() * 1000),
-        phone,
-        1000,
-        `🎁 Подарки (п. 5.10) — хороший подарок ПР (${giverName || 'ПР'})`,
-        new Date().toLocaleString('ru-RU')
-      ]
-    );
-
-    res.json({ ok: true, newAura });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -2410,6 +2318,27 @@ app.post('/api/doc_requests', async (req, res) => {
       [a.id, a.userPhone, a.userName, a.docType, a.status || 'pending', a.createdAt,
        a.prComment || null, a.resolvedAt || null, a.resolvedBy || null]
     );
+
+    if (a.status === 'pending') {
+      const prRes = await pool.query("SELECT phone FROM users WHERE status='ПР' LIMIT 1");
+      if (prRes.rows.length > 0) {
+        const DOC_NAMES = {
+          pension: '💰 Пенсия',
+          insurance: '🛡️ Страховка',
+          casino_permit: '🎰 Разрешение на казик',
+          pm_status: '💎 Статус ПМ / ПЗ',
+        };
+        await createNotification(
+          prRes.rows[0].phone,
+          'request',
+          `📄 Заявка на документ`,
+          `${a.userName}: ${DOC_NAMES[a.docType] || a.docType}`,
+          'doc_requests',
+          null
+        );
+      }
+    }
+
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -2439,10 +2368,27 @@ app.post('/api/doc_requests/:id/resolve', async (req, res) => {
            ON CONFLICT (phone) DO UPDATE SET granted_at=$2, granted_by=$3`,
           [request.user_phone, new Date().toISOString(), resolvedBy || 'ПР']
         );
-      } else if (request.doc_type === 'pm_status') {
-        // ПР ставит статус ВРУЧНУЮ через 👥 Данные ЖИ
       }
+
+      await createNotification(
+        request.user_phone,
+        'system',
+        '✅ Заявка одобрена',
+        prComment || 'Документ оформлен',
+        'documents',
+        null
+      );
+    } else if (status === 'rejected') {
+      await createNotification(
+        request.user_phone,
+        'system',
+        '❌ Заявка отклонена',
+        prComment || 'Без причины',
+        'documents',
+        null
+      );
     }
+
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -2584,6 +2530,7 @@ app.delete('/api/parties/:id', async (req, res) => {
     await pool.query('DELETE FROM party_candidates WHERE party_id=$1', [req.params.id]);
     await pool.query('DELETE FROM party_requests WHERE party_id=$1', [req.params.id]);
     await pool.query('DELETE FROM party_members WHERE party_id=$1', [req.params.id]);
+    await pool.query('DELETE FROM party_wins WHERE party_id=$1', [req.params.id]);
     await pool.query('DELETE FROM parties WHERE id=$1', [req.params.id]);
 
     await pool.query('UPDATE users SET has_created_party=false WHERE phone=$1', [leaderPhone]);
@@ -2616,6 +2563,16 @@ app.post('/api/parties/:id/join', async (req, res) => {
       `INSERT INTO party_requests (id, party_id, user_phone, user_name, status, created_at)
        VALUES ($1, $2, $3, $4, 'pending', $5)`,
       [Date.now(), req.params.id, userPhone, userName, new Date().toISOString()]
+    );
+
+    const leaderPhone = pRes.rows[0].leader_phone;
+    await createNotification(
+      leaderPhone,
+      'request',
+      `📨 Заявка в партию «${pRes.rows[0].name}»`,
+      userName,
+      'party',
+      String(req.params.id)
     );
 
     res.json({ ok: true });
@@ -2669,6 +2626,24 @@ app.post('/api/party_requests/:id/resolve', async (req, res) => {
          ON CONFLICT DO NOTHING`,
         [request.party_id, request.user_phone, request.user_name, new Date().toISOString()]
       );
+
+      await createNotification(
+        request.user_phone,
+        'system',
+        '✅ Заявка в партию одобрена',
+        `Добро пожаловать в «${pRes.rows[0].name}»!`,
+        'party',
+        String(request.party_id)
+      );
+    } else {
+      await createNotification(
+        request.user_phone,
+        'system',
+        '❌ Заявка в партию отклонена',
+        pRes.rows[0].name,
+        'parties',
+        null
+      );
     }
 
     res.json({ ok: true });
@@ -2690,6 +2665,15 @@ app.delete('/api/parties/:id/members/:phone', async (req, res) => {
     await pool.query(
       'DELETE FROM party_candidates WHERE party_id=$1 AND phone=$2',
       [req.params.id, req.params.phone]
+    );
+
+    await createNotification(
+      req.params.phone,
+      'system',
+      '❌ Вас исключили из партии',
+      pRes.rows[0].name,
+      'parties',
+      null
     );
 
     res.json({ ok: true });
@@ -2778,6 +2762,25 @@ app.post('/api/party_messages', async (req, res) => {
        ON CONFLICT (id) DO NOTHING`,
       [m.id, m.partyId, m.from, m.fromName, m.text || '', m.replyTo || null, m.voice || null, m.voiceDuration || null, m.time, m.date || null]
     );
+
+    const partyRes = await pool.query('SELECT name FROM parties WHERE id=$1', [m.partyId]);
+    const partyName = partyRes.rows[0]?.name || 'Партия';
+    const membersRes = await pool.query(
+      'SELECT phone FROM party_members WHERE party_id=$1 AND phone <> $2',
+      [m.partyId, m.from]
+    );
+    const preview = m.voice ? '🎤 Голосовое' : (m.text || '').slice(0, 60);
+    for (const mbr of membersRes.rows) {
+      await createNotification(
+        mbr.phone,
+        'message',
+        `🏛️ ${partyName}`,
+        `${m.fromName}: ${preview}`,
+        'party_chat',
+        String(m.partyId)
+      );
+    }
+
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -2824,6 +2827,16 @@ app.post('/api/debts', async (req, res) => {
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'active',$9,$10)`,
       [id, d.debtorPhone, d.debtorName, d.creditorPhone, d.creditorName, d.amount, d.reason, d.dueDate, d.createdBy || null, d.isGovernment || false]
     );
+
+    await createNotification(
+      d.debtorPhone,
+      'system',
+      d.isGovernment ? `🏛️ Новый гос. долг: ${d.amount}₮` : `💸 Новый долг: ${d.amount}₮`,
+      d.reason,
+      'debts',
+      null
+    );
+
     res.json({ ok: true, id });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -2837,7 +2850,6 @@ app.post('/api/debts/:id/pay', async (req, res) => {
 
     if (debt.status === 'paid') return res.status(400).json({ error: 'Уже выплачен' });
 
-    // ═══ Списываем у должника ═══
     const debtorRes = await pool.query('SELECT * FROM users WHERE phone=$1', [debt.debtor_phone]);
     if (debtorRes.rows.length === 0) return res.status(404).json({ error: 'Должник не найден' });
     const debtor = debtorRes.rows[0];
@@ -2854,12 +2866,10 @@ app.post('/api/debts/:id/pay', async (req, res) => {
       [debt.amount, debt.debtor_phone]
     );
 
-    // ═══ Начисляем кредитору (или ПР для гос. долга) ═══
     let recipientPhone = debt.creditor_phone;
     let recipientName = debt.creditor_name;
 
     if (debt.is_government) {
-      // Гос. долг → идёт ПР
       const prRes = await pool.query("SELECT phone, first_name, last_name FROM users WHERE status='ПР' LIMIT 1");
       if (prRes.rows.length > 0) {
         recipientPhone = prRes.rows[0].phone;
@@ -2875,14 +2885,12 @@ app.post('/api/debts/:id/pay', async (req, res) => {
       );
     }
 
-    // ═══ Помечаем долг выплаченным ═══
     const now = new Date().toISOString();
     await pool.query(
       `UPDATE debts SET status='paid', paid_at=$1 WHERE id=$2`,
       [now, req.params.id]
     );
 
-    // ═══ Сообщение в общий чат ═══
     await pool.query(
       `INSERT INTO messages (id, from_phone, from_name, from_avatar, from_status, text, time, date)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
@@ -2898,13 +2906,19 @@ app.post('/api/debts/:id/pay', async (req, res) => {
       ]
     );
 
+    await createNotification(
+      recipientPhone,
+      'system',
+      `💰 Вам выплатили долг: ${debt.amount}₮`,
+      `От ${debt.debtor_name}`,
+      'debts',
+      null
+    );
+
     res.json({ ok: true, paidAt: now, amount: debt.amount, recipient: recipientName });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// ═══════════════════════════════════════════════════════
-// ЗАКРЫТЬ ДОЛГ ВРУЧНУЮ (ПР / кредитор)
-// ═══════════════════════════════════════════════════════
 app.post('/api/debts/:id/mark_paid', async (req, res) => {
   try {
     const { markedBy, markedByPhone } = req.body;
@@ -2926,13 +2940,19 @@ app.post('/api/debts/:id/mark_paid', async (req, res) => {
       [now, req.params.id]
     );
 
+    await createNotification(
+      debt.debtor_phone,
+      'system',
+      '✅ Долг закрыт',
+      `${debt.creditor_name} пометил долг как выплаченный`,
+      'debts',
+      null
+    );
+
     res.json({ ok: true, paidAt: now });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// ═══════════════════════════════════════════════════════
-// АПЕЛЛЯЦИЯ НА ДОЛГ (должник)
-// ═══════════════════════════════════════════════════════
 app.post('/api/debts/:id/appeal', async (req, res) => {
   try {
     const { userPhone, reason } = req.body;
@@ -2960,7 +2980,18 @@ app.post('/api/debts/:id/appeal', async (req, res) => {
       [reason.trim(), now, req.params.id]
     );
 
-    // Сообщение ПР
+    const prRes = await pool.query("SELECT phone FROM users WHERE status='ПР' LIMIT 1");
+    if (prRes.rows.length > 0) {
+      await createNotification(
+        prRes.rows[0].phone,
+        'appeal',
+        `📝 Апелляция на долг`,
+        `${debt.debtor_name}: ${reason.trim()}`,
+        'debts_admin',
+        null
+      );
+    }
+
     await pool.query(
       `INSERT INTO messages (id, from_phone, from_name, from_avatar, from_status, text, time, date)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
@@ -2980,9 +3011,6 @@ app.post('/api/debts/:id/appeal', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// ═══════════════════════════════════════════════════════
-// РЕШИТЬ АПЕЛЛЯЦИЮ ПО ДОЛГУ (ПР)
-// ═══════════════════════════════════════════════════════
 app.post('/api/debts/:id/appeal/resolve', async (req, res) => {
   try {
     const { status, prComment, resolvedBy, resolvedByPhone } = req.body;
@@ -3000,8 +3028,16 @@ app.post('/api/debts/:id/appeal/resolve', async (req, res) => {
     const now = new Date().toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
     if (status === 'approved') {
-      // Одобрено → удаляем долг
       await pool.query('DELETE FROM debts WHERE id=$1', [req.params.id]);
+
+      await createNotification(
+        debt.debtor_phone,
+        'system',
+        '✅ Апелляция одобрена',
+        `Долг ${debt.amount}₮ снят`,
+        'debts',
+        null
+      );
 
       await pool.query(
         `INSERT INTO messages (id, from_phone, from_name, from_avatar, from_status, text, time, date)
@@ -3018,7 +3054,6 @@ app.post('/api/debts/:id/appeal/resolve', async (req, res) => {
         ]
       );
     } else {
-      // Отклонено → оставляем долг, записываем комментарий
       await pool.query(
         `UPDATE debts SET
           appeal_status='rejected',
@@ -3029,19 +3064,13 @@ app.post('/api/debts/:id/appeal/resolve', async (req, res) => {
         [prComment || null, now, resolvedBy || null, req.params.id]
       );
 
-      await pool.query(
-        `INSERT INTO messages (id, from_phone, from_name, from_avatar, from_status, text, time, date)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-        [
-          Date.now() + Math.floor(Math.random() * 100000),
-          'system',
-          '📝 Апелляция отклонена',
-          null,
-          'БОТ',
-          `❌ ${debt.debtor_name} — апелляция на долг ${debt.amount}₮ отклонена. ${prComment || ''}`,
-          new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }),
-          new Date().toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })
-        ]
+      await createNotification(
+        debt.debtor_phone,
+        'system',
+        '❌ Апелляция отклонена',
+        prComment || 'Без причины',
+        'debts',
+        null
       );
     }
 
@@ -3089,6 +3118,646 @@ app.get('/api/leaderboard', async (req, res) => {
     })));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
+
+// ═══════════════════════════════════════════════════════
+// РЕАКЦИИ
+// ═══════════════════════════════════════════════════════
+app.get('/api/reactions', async (req, res) => {
+  try {
+    const { chat_type, chat_id, message_ids } = req.query;
+    if (!chat_type || !message_ids) return res.json([]);
+    const ids = message_ids.split(',').map(x => parseInt(x)).filter(x => !isNaN(x));
+    if (ids.length === 0) return res.json([]);
+
+    let q = `SELECT * FROM message_reactions WHERE chat_type=$1 AND message_id = ANY($2::bigint[])`;
+    let params = [chat_type, ids];
+    if (chat_id) {
+      q += ` AND chat_id=$3`;
+      params.push(chat_id);
+    }
+    const r = await pool.query(q, params);
+    res.json(r.rows.map(x => ({
+      id: x.id, messageId: x.message_id, chatType: x.chat_type, chatId: x.chat_id,
+      fromPhone: x.from_phone, fromName: x.from_name, emoji: x.emoji,
+    })));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/reactions/toggle', async (req, res) => {
+  try {
+    const { messageId, chatType, chatId, fromPhone, fromName, emoji } = req.body;
+    if (!messageId || !chatType || !fromPhone || !emoji) {
+      return res.status(400).json({ error: 'Bad params' });
+    }
+
+    const existing = await pool.query(
+      `SELECT id FROM message_reactions 
+       WHERE message_id=$1 AND chat_type=$2 AND COALESCE(chat_id,'')=COALESCE($3,'') 
+       AND from_phone=$4 AND emoji=$5`,
+      [messageId, chatType, chatId || null, fromPhone, emoji]
+    );
+
+    if (existing.rows.length > 0) {
+      await pool.query('DELETE FROM message_reactions WHERE id=$1', [existing.rows[0].id]);
+      return res.json({ ok: true, action: 'removed' });
+    }
+
+    await pool.query(
+      `INSERT INTO message_reactions (id, message_id, chat_type, chat_id, from_phone, from_name, emoji)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+      [Date.now() + Math.floor(Math.random() * 1000), messageId, chatType, chatId || null, fromPhone, fromName, emoji]
+    );
+    res.json({ ok: true, action: 'added' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ═══════════════════════════════════════════════════════
+// ГРУППЫ
+// ═══════════════════════════════════════════════════════
+app.get('/api/groups', async (req, res) => {
+  try {
+    const r = await pool.query('SELECT * FROM group_chats ORDER BY created_at DESC');
+    const groups = [];
+    for (const g of r.rows) {
+      const members = await pool.query(
+        'SELECT phone, name FROM group_members WHERE group_id=$1',
+        [g.id]
+      );
+      groups.push({
+        id: g.id,
+        name: g.name,
+        avatar: g.avatar,
+        creatorPhone: g.creator_phone,
+        createdAt: g.created_at,
+        members: members.rows.map(m => ({ phone: m.phone, name: m.name })),
+      });
+    }
+    res.json(groups);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/groups', async (req, res) => {
+  try {
+    const { name, creatorPhone, creatorName, members } = req.body;
+    if (!name || !creatorPhone || !members || members.length < 1) {
+      return res.status(400).json({ error: 'Bad params' });
+    }
+    if (members.length > 20) return res.status(400).json({ error: 'Максимум 20 участников' });
+
+    const id = Date.now();
+    await pool.query(
+      `INSERT INTO group_chats (id, name, creator_phone) VALUES ($1,$2,$3)`,
+      [id, name, creatorPhone]
+    );
+
+    await pool.query(
+      `INSERT INTO group_members (group_id, phone, name) VALUES ($1,$2,$3)`,
+      [id, creatorPhone, creatorName]
+    );
+
+    for (const m of members) {
+      if (m.phone === creatorPhone) continue;
+      await pool.query(
+        `INSERT INTO group_members (group_id, phone, name) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`,
+        [id, m.phone, m.name]
+      );
+      await createNotification(
+        m.phone,
+        'system',
+        `👥 Добавлен в группу «${name}»`,
+        `Создатель: ${creatorName}`,
+        'group_chat',
+        String(id)
+      );
+    }
+
+    res.json({ ok: true, groupId: id });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/groups/:id/rename', async (req, res) => {
+  try {
+    const { userPhone, name } = req.body;
+    const g = await pool.query('SELECT * FROM group_chats WHERE id=$1', [req.params.id]);
+    if (g.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    if (g.rows[0].creator_phone !== userPhone) return res.status(403).json({ error: 'Только создатель' });
+
+    await pool.query('UPDATE group_chats SET name=$1 WHERE id=$2', [name, req.params.id]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/groups/:id/avatar', async (req, res) => {
+  try {
+    const { userPhone, avatar } = req.body;
+    const g = await pool.query('SELECT * FROM group_chats WHERE id=$1', [req.params.id]);
+    if (g.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    if (g.rows[0].creator_phone !== userPhone) return res.status(403).json({ error: 'Только создатель' });
+
+    await pool.query('UPDATE group_chats SET avatar=$1 WHERE id=$2', [avatar || null, req.params.id]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/groups/:id/members/add', async (req, res) => {
+  try {
+    const { userPhone, memberPhone, memberName } = req.body;
+    const g = await pool.query('SELECT * FROM group_chats WHERE id=$1', [req.params.id]);
+    if (g.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    if (g.rows[0].creator_phone !== userPhone) return res.status(403).json({ error: 'Только создатель' });
+
+    const cnt = await pool.query('SELECT COUNT(*) FROM group_members WHERE group_id=$1', [req.params.id]);
+    if (parseInt(cnt.rows[0].count) >= 20) return res.status(400).json({ error: 'Группа заполнена (20)' });
+
+    await pool.query(
+      'INSERT INTO group_members (group_id, phone, name) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING',
+      [req.params.id, memberPhone, memberName]
+    );
+
+    await createNotification(
+      memberPhone,
+      'system',
+      `👥 Добавлен в группу «${g.rows[0].name}»`,
+      null,
+      'group_chat',
+      String(req.params.id)
+    );
+
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/groups/:id/members/:phone', async (req, res) => {
+  try {
+    const { userPhone } = req.body;
+    const g = await pool.query('SELECT * FROM group_chats WHERE id=$1', [req.params.id]);
+    if (g.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+
+    const isCreator = g.rows[0].creator_phone === userPhone;
+    const isSelf = userPhone === req.params.phone;
+    if (!isCreator && !isSelf) return res.status(403).json({ error: 'Нет прав' });
+    if (req.params.phone === g.rows[0].creator_phone) {
+      return res.status(400).json({ error: 'Создатель не может выйти. Удали группу.' });
+    }
+
+    await pool.query('DELETE FROM group_members WHERE group_id=$1 AND phone=$2',
+      [req.params.id, req.params.phone]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/groups/:id', async (req, res) => {
+  try {
+    const { userPhone } = req.body;
+    const g = await pool.query('SELECT * FROM group_chats WHERE id=$1', [req.params.id]);
+    if (g.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    if (g.rows[0].creator_phone !== userPhone) return res.status(403).json({ error: 'Только создатель' });
+
+    await pool.query('DELETE FROM group_messages WHERE group_id=$1', [req.params.id]);
+    await pool.query('DELETE FROM group_members WHERE group_id=$1', [req.params.id]);
+    await pool.query('DELETE FROM group_chats WHERE id=$1', [req.params.id]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/group_messages/:groupId', async (req, res) => {
+  try {
+    const r = await pool.query(
+      'SELECT * FROM group_messages WHERE group_id=$1 ORDER BY id ASC LIMIT 200',
+      [req.params.groupId]
+    );
+    res.json(r.rows.map(m => ({
+      id: m.id, groupId: m.group_id,
+      from: m.from_phone, fromName: m.from_name, fromAvatar: m.from_avatar,
+      text: m.text, replyTo: m.reply_to,
+      voice: m.voice, voiceDuration: m.voice_duration,
+      time: m.time, date: m.date,
+    })));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/group_messages', async (req, res) => {
+  try {
+    const m = req.body;
+    await pool.query(
+      `INSERT INTO group_messages (id, group_id, from_phone, from_name, from_avatar, text, reply_to, voice, voice_duration, time, date)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT (id) DO NOTHING`,
+      [m.id, m.groupId, m.from, m.fromName, m.fromAvatar || null, m.text || '', m.replyTo || null, m.voice || null, m.voiceDuration || null, m.time, m.date || null]
+    );
+
+    const groupRes = await pool.query('SELECT name FROM group_chats WHERE id=$1', [m.groupId]);
+    const groupName = groupRes.rows[0]?.name || 'Группа';
+    const membersRes = await pool.query(
+      'SELECT phone FROM group_members WHERE group_id=$1 AND phone <> $2',
+      [m.groupId, m.from]
+    );
+    const preview = m.voice ? '🎤 Голосовое' : (m.text || '').slice(0, 60);
+    for (const mbr of membersRes.rows) {
+      await createNotification(
+        mbr.phone,
+        'message',
+        `💬 ${groupName}`,
+        `${m.fromName}: ${preview}`,
+        'group_chat',
+        String(m.groupId)
+      );
+    }
+
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/group_messages/:groupId/clear', async (req, res) => {
+  try {
+    const { userPhone } = req.body;
+    const g = await pool.query('SELECT * FROM group_chats WHERE id=$1', [req.params.groupId]);
+    if (g.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    if (g.rows[0].creator_phone !== userPhone) return res.status(403).json({ error: 'Только создатель' });
+
+    await pool.query('DELETE FROM group_messages WHERE group_id=$1', [req.params.groupId]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ═══════════════════════════════════════════════════════
+// НАСТРОЙКИ ЧАТА
+// ═══════════════════════════════════════════════════════
+app.get('/api/chat_settings/:phone', async (req, res) => {
+  try {
+    const r = await pool.query('SELECT * FROM chat_settings WHERE phone=$1', [req.params.phone]);
+    res.json(r.rows.map(x => ({
+      chatType: x.chat_type, chatId: x.chat_id,
+      clearedAt: x.cleared_at, deleted: x.deleted,
+      blocked: x.blocked, lastReadId: x.last_read_id,
+    })));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/chat_settings', async (req, res) => {
+  try {
+    const { phone, chatType, chatId, clearedAt, deleted, blocked, lastReadId } = req.body;
+    if (!phone || !chatType || !chatId) return res.status(400).json({ error: 'Bad params' });
+
+    await pool.query(
+      `INSERT INTO chat_settings (phone, chat_type, chat_id, cleared_at, deleted, blocked, last_read_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)
+       ON CONFLICT (phone, chat_type, chat_id) DO UPDATE SET
+         cleared_at = COALESCE($4, chat_settings.cleared_at),
+         deleted = COALESCE($5, chat_settings.deleted),
+         blocked = COALESCE($6, chat_settings.blocked),
+         last_read_id = COALESCE($7, chat_settings.last_read_id)`,
+      [phone, chatType, chatId, clearedAt || null, deleted, blocked, lastReadId || null]
+    );
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/messages/clear_all', async (req, res) => {
+  try {
+    const { userPhone } = req.body;
+    const u = await pool.query('SELECT status FROM users WHERE phone=$1', [userPhone]);
+    if (u.rows.length === 0 || u.rows[0].status !== 'ПР') {
+      return res.status(403).json({ error: 'Только ПР' });
+    }
+    await pool.query('DELETE FROM messages');
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ═══════════════════════════════════════════════════════
+// УВЕДОМЛЕНИЯ (эндпоинты)
+// ═══════════════════════════════════════════════════════
+app.get('/api/notifications/:phone', async (req, res) => {
+  try {
+    const r = await pool.query(
+      'SELECT * FROM notifications WHERE phone=$1 ORDER BY created_at DESC LIMIT 50',
+      [req.params.phone]
+    );
+    res.json(r.rows.map(n => ({
+      id: n.id,
+      phone: n.phone,
+      type: n.type,
+      title: n.title,
+      text: n.text,
+      target: n.target,
+      targetId: n.target_id,
+      read: n.read,
+      createdAt: n.created_at,
+    })));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/notifications/:id/read', async (req, res) => {
+  try {
+    await pool.query('UPDATE notifications SET read=true WHERE id=$1', [req.params.id]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/notifications/:phone/read_all', async (req, res) => {
+  try {
+    await pool.query('UPDATE notifications SET read=true WHERE phone=$1', [req.params.phone]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/notifications/:id', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM notifications WHERE id=$1', [req.params.id]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/notifications', async (req, res) => {
+  try {
+    const { phone, type, title, text, target, targetId } = req.body;
+    if (!phone || !type || !title) return res.status(400).json({ error: 'Bad params' });
+    await createNotification(phone, type, title, text, target, targetId);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ═══════════════════════════════════════════════════════
+// АВТО-НАГРАДЫ (5.7, 5.9, 5.11, 5.12)
+// ═══════════════════════════════════════════════════════
+const tickAutoRewards = async () => {
+  try {
+    // 5.7 Богач
+    const richRes = await pool.query(`
+      SELECT phone, first_name, last_name, tonki, aura
+      FROM users
+      WHERE status <> 'ПР' AND tonki > 300 AND last_rich_reward = false
+    `);
+    for (const u of richRes.rows) {
+      await pool.query(
+        'UPDATE users SET aura = COALESCE(aura, 0) + 2000, last_rich_reward = true WHERE phone = $1',
+        [u.phone]
+      );
+      await pool.query(
+        `INSERT INTO aura_history (id, phone, delta, reason, date)
+         VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO NOTHING`,
+        [
+          Date.now() + Math.floor(Math.random() * 100000),
+          u.phone,
+          2000,
+          '💰 Богач (п. 5.7) — набрал >300₮',
+          new Date().toLocaleString('ru-RU')
+        ]
+      );
+      await createNotification(u.phone, 'reward', '💰 Богач', '+2000 ауры за >300₮', 'rewards', null);
+    }
+
+    // 5.11 Топ 1
+    const today = new Date().toISOString().slice(0, 10);
+    const top1Res = await pool.query(`
+      SELECT phone, first_name, last_name, aura, top1_streak, last_top1_check
+      FROM users WHERE status <> 'ПР' ORDER BY aura DESC LIMIT 1
+    `);
+    if (top1Res.rows.length > 0) {
+      const top1 = top1Res.rows[0];
+      if (top1.last_top1_check !== today) {
+        const newStreak = (top1.top1_streak || 0) + 1;
+        await pool.query(
+          'UPDATE users SET top1_streak = $1, last_top1_check = $2 WHERE phone = $3',
+          [newStreak, today, top1.phone]
+        );
+
+        if (newStreak >= 2) {
+          await pool.query(
+            'UPDATE users SET top1_streak = 0 WHERE phone <> $1 AND status <> $2',
+            [top1.phone, 'ПР']
+          );
+
+          const alreadyRewardedToday = await pool.query(
+            `SELECT id FROM aura_history WHERE phone = $1 AND reason LIKE '%Топ 1%' AND date >= $2`,
+            [top1.phone, today]
+          );
+          if (alreadyRewardedToday.rows.length === 0) {
+            await pool.query(
+              'UPDATE users SET tonki = tonki + 10, aura = COALESCE(aura, 0) + 500 WHERE phone = $1',
+              [top1.phone]
+            );
+            await pool.query(
+              `INSERT INTO aura_history (id, phone, delta, reason, date)
+               VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO NOTHING`,
+              [
+                Date.now() + Math.floor(Math.random() * 100000),
+                top1.phone,
+                500,
+                '🏆 Топ 1 (п. 5.11) — 2+ дня на первом месте',
+                new Date().toLocaleString('ru-RU')
+              ]
+            );
+            await createNotification(top1.phone, 'reward', '🏆 Топ 1', '+10₮, +500 ауры', 'rewards', null);
+          }
+        }
+      }
+    }
+
+    // 5.12 Главный пенсионер
+    const pensionRes = await pool.query(`
+      SELECT phone, first_name, last_name, pension_started_at
+      FROM users
+      WHERE has_pension = true AND last_pensioner_reward = false
+        AND pension_started_at IS NOT NULL
+        AND pension_started_at < NOW() - INTERVAL '90 days'
+    `);
+    for (const u of pensionRes.rows) {
+      await pool.query(
+        'UPDATE users SET tonki = tonki + 20, aura = COALESCE(aura, 0) + 1000, last_pensioner_reward = true WHERE phone = $1',
+        [u.phone]
+      );
+      await pool.query(
+        `INSERT INTO aura_history (id, phone, delta, reason, date)
+         VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO NOTHING`,
+        [
+          Date.now() + Math.floor(Math.random() * 100000),
+          u.phone,
+          1000,
+          '👴 Главный пенсионер (п. 5.12) — 3 месяца на пенсии',
+          new Date().toLocaleString('ru-RU')
+        ]
+      );
+      await createNotification(u.phone, 'reward', '👴 Главный пенсионер', '+20₮, +1000 ауры', 'rewards', null);
+    }
+
+    await pool.query(`
+      UPDATE users SET pension_started_at = NOW()
+      WHERE has_pension = true AND pension_started_at IS NULL
+    `);
+  } catch (err) { console.error('tickAutoRewards:', err.message); }
+};
+
+// ═══════════════════════════════════════════════════════
+// АВТО-ШТРАФЫ
+// ═══════════════════════════════════════════════════════
+const tickAutoFines = async () => {
+  try {
+    const now = Date.now();
+    const DAY = 24 * 60 * 60 * 1000;
+    const usersRes = await pool.query('SELECT * FROM users WHERE status <> $1', ['ПР']);
+
+    for (const u of usersRes.rows) {
+      if (u.is_banned) continue;
+      const FINE_COOLDOWN = 6 * 60 * 60 * 1000;
+
+      const lastSeen = u.last_seen_at ? new Date(u.last_seen_at).getTime() : 0;
+      const daysSinceSeen = lastSeen ? (now - lastSeen) / DAY : 999;
+      const lastInactive = u.last_auto_inactive_at ? new Date(u.last_auto_inactive_at).getTime() : 0;
+      if (daysSinceSeen >= 14 && (now - lastInactive) > FINE_COOLDOWN) {
+        await applyAutoFine(u, {
+          reason: '💤 Неактивность (п. 3.3)',
+          fineAmount: 0,
+          auraDelta: -400,
+          stampDays: 2,
+          stampReason: '3.3 — Неактивность',
+          cooldownField: 'last_auto_inactive_at',
+        });
+      }
+
+      const lastTax = u.last_tax_paid_at ? new Date(u.last_tax_paid_at).getTime() : 0;
+      const daysSinceTax = lastTax ? (now - lastTax) / DAY : 999;
+      const lastTaxFine = u.last_auto_tax_at ? new Date(u.last_auto_tax_at).getTime() : 0;
+      if (daysSinceTax >= 4 && (now - lastTaxFine) > FINE_COOLDOWN) {
+        await applyAutoFine(u, {
+          reason: '📋 Налоги не оплачены (п. 3.11)',
+          fineAmount: 5,
+          auraDelta: -150,
+          cooldownField: 'last_auto_tax_at',
+        });
+      }
+
+      const profsRes = await pool.query('SELECT * FROM professions WHERE phone = $1', [u.phone]);
+      const lastIdle = u.last_auto_idle_at ? new Date(u.last_auto_idle_at).getTime() : 0;
+      for (const p of profsRes.rows) {
+        const lastPaid = p.last_paid_at ? new Date(p.last_paid_at).getTime() : 0;
+        const daysSincePay = lastPaid ? (now - lastPaid) / DAY : 999;
+        if (daysSincePay >= 3 && (now - lastIdle) > FINE_COOLDOWN) {
+          await applyAutoFine(u, {
+            reason: `🚫 Бездельничество (п. 3.6) — ${p.profession}`,
+            fineAmount: 10,
+            auraDelta: -100,
+            cooldownField: 'last_auto_idle_at',
+          });
+          break;
+        }
+      }
+
+      const creditsRes = await pool.query(`SELECT * FROM credits WHERE user_phone = $1 AND status = 'active'`, [u.phone]);
+      const lastCredit = u.last_auto_credit_at ? new Date(u.last_auto_credit_at).getTime() : 0;
+      for (const c of creditsRes.rows) {
+        if (c.due_date && new Date(c.due_date).getTime() < now && (now - lastCredit) > FINE_COOLDOWN) {
+          const remaining = c.total_due - (c.paid || 0);
+          await applyAutoFine(u, {
+            reason: `💳 Кредит просрочен (п. 3.10) — ${remaining}₮`,
+            fineAmount: 0,
+            auraDelta: -300,
+            stampDays: 30,
+            stampReason: '3.10 — Кредит не возвращён',
+            cooldownField: 'last_auto_credit_at',
+          });
+          break;
+        }
+      }
+
+      const lastDebtor = u.last_auto_debtor_at ? new Date(u.last_auto_debtor_at).getTime() : 0;
+      if (u.tonki < -200 && (now - lastDebtor) > FINE_COOLDOWN) {
+        await pool.query(
+          `UPDATE users SET
+            is_banned = true, ban_type = 'forgiving',
+            ban_reason = '3.17 — Должник (баланс -200₮ и ниже)',
+            tonki = 50, last_auto_debtor_at = NOW()
+          WHERE phone = $1`,
+          [u.phone]
+        );
+        await createNotification(u.phone, 'system', '🕊️ Выселен по п. 3.17', 'Баланс -200₮ и ниже', null, null);
+      }
+    }
+  } catch (err) { console.error('tickAutoFines:', err.message); }
+};
+
+const applyAutoFine = async (user, opts) => {
+  try {
+    if (opts.fineAmount > 0) {
+      await pool.query(
+        `INSERT INTO fines (id, phone, reason, amount, from_phone, from_name, date, paid)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, false)`,
+        [
+          Date.now() + Math.floor(Math.random() * 1000),
+          user.phone,
+          opts.reason,
+          opts.fineAmount,
+          'auto',
+          '🤖 Авто',
+          new Date().toLocaleString('ru-RU')
+        ]
+      );
+    }
+
+    if (opts.auraDelta && opts.auraDelta !== 0) {
+      const newAura = (user.aura || 0) + opts.auraDelta;
+      let newStatus = user.status;
+      if (user.status === 'ПМ' && newAura < 9800) newStatus = 'ЖИ';
+      await pool.query('UPDATE users SET aura = $1, status = $2 WHERE phone = $3', [newAura, newStatus, user.phone]);
+      await pool.query(
+        `INSERT INTO aura_history (id, phone, delta, reason, date)
+         VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO NOTHING`,
+        [Date.now() + Math.floor(Math.random() * 1000), user.phone, opts.auraDelta, `⚠️ Автоштраф: ${opts.reason}`, new Date().toLocaleString('ru-RU')]
+      );
+    }
+
+    if (opts.stampDays) {
+      const until = new Date(Date.now() + opts.stampDays * 24 * 60 * 60 * 1000).toISOString();
+      await pool.query(
+        `UPDATE users SET is_banned = false, ban_reason = $1, ban_type = 'stamp', stamp_until = $2 WHERE phone = $3`,
+        [opts.stampReason, until, user.phone]
+      );
+    }
+
+    if (opts.cooldownField) {
+      await pool.query(`UPDATE users SET ${opts.cooldownField} = NOW() WHERE phone = $1`, [user.phone]);
+    }
+
+    await createNotification(
+      user.phone,
+      'fine',
+      `⚠️ Автоштраф: ${opts.reason}`,
+      `${opts.fineAmount > 0 ? opts.fineAmount + '₮ ' : ''}${opts.auraDelta ? opts.auraDelta + ' ауры' : ''}${opts.stampDays ? ' штамм ' + opts.stampDays + ' дн.' : ''}`,
+      'fines',
+      null
+    );
+  } catch (err) { console.error('applyAutoFine:', err.message); }
+};
+
+// ═══════════════════════════════════════════════════════
+// ФАРМ АУРЫ (5.13)
+// ═══════════════════════════════════════════════════════
+const tickFarmAura = async () => {
+  try {
+    const res = await pool.query(`
+      SELECT phone, first_name, last_name, aura FROM users
+      WHERE status <> 'ПР' AND aura >= 12000 AND farm_aura_applied = false
+    `);
+    for (const u of res.rows) {
+      await pool.query('UPDATE users SET farm_aura_applied = true WHERE phone = $1', [u.phone]);
+      await createNotification(u.phone, 'reward', '💎 Фарм ауры', 'Скидка 1₮ на всё (кроме налогов)', 'profile', null);
+    }
+
+    await pool.query(`
+      UPDATE users SET farm_aura_applied = false
+      WHERE status <> 'ПР' AND aura < 12000 AND farm_aura_applied = true
+    `);
+  } catch (err) { console.error('tickFarmAura:', err.message); }
+};
+
+setInterval(tickAutoRewards, 60 * 60 * 1000);
+setTimeout(tickAutoRewards, 30 * 1000);
+
+setInterval(tickAutoFines, 6 * 60 * 60 * 1000);
+setTimeout(tickAutoFines, 60 * 1000);
+
+setInterval(tickFarmAura, 60 * 60 * 1000);
+setTimeout(tickFarmAura, 20 * 1000);
 
 // ═══════════════════════════════════════════════════════
 // АВТО-КУРС
@@ -3148,11 +3817,7 @@ const tickHolidays = async () => {
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
         [
           Date.now() + Math.floor(Math.random() * 100000),
-          'system',
-          '🎉 Праздник',
-          null,
-          'БОТ',
-          text,
+          'system', '🎉 Праздник', null, 'БОТ', text,
           new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }),
           new Date().toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })
         ]
@@ -3160,34 +3825,24 @@ const tickHolidays = async () => {
     };
 
     if (month === 4 && day === 10) {
-      const usersRes = await pool.query(
-        'SELECT phone, last_okpf_day_year FROM users WHERE status <> $1',
-        ['ПР']
-      );
+      const usersRes = await pool.query('SELECT phone, last_okpf_day_year FROM users WHERE status <> $1', ['ПР']);
       let count = 0;
       for (const u of usersRes.rows) {
         if (u.last_okpf_day_year === year) continue;
-        await pool.query(
-          'UPDATE users SET tonki = tonki + 10, last_okpf_day_year = $1 WHERE phone = $2',
-          [year, u.phone]
-        );
+        await pool.query('UPDATE users SET tonki = tonki + 10, last_okpf_day_year = $1 WHERE phone = $2', [year, u.phone]);
+        await createNotification(u.phone, 'reward', '🎉 День ОКПФ', '+10₮', 'rewards', null);
         count++;
       }
       if (count > 0) await sendSystemMsg(`🎉 С Днём ОКПФ! +10 ₮ всем ЖИ (${count} чел.)`);
     }
 
     if (month === 10 && day === 23) {
-      const usersRes = await pool.query(
-        'SELECT phone, last_pf_day_year FROM users WHERE status <> $1',
-        ['ПР']
-      );
+      const usersRes = await pool.query('SELECT phone, last_pf_day_year FROM users WHERE status <> $1', ['ПР']);
       let count = 0;
       for (const u of usersRes.rows) {
         if (u.last_pf_day_year === year) continue;
-        await pool.query(
-          'UPDATE users SET tonki = tonki + 20, last_pf_day_year = $1 WHERE phone = $2',
-          [year, u.phone]
-        );
+        await pool.query('UPDATE users SET tonki = tonki + 20, last_pf_day_year = $1 WHERE phone = $2', [year, u.phone]);
+        await createNotification(u.phone, 'reward', '🏚️ День ПФ', '+20₮', 'rewards', null);
         count++;
       }
       if (count > 0) await sendSystemMsg(`🏚️ С Днём ПФ! +20 ₮ всем ЖИ (${count} чел.)`);
@@ -3195,18 +3850,15 @@ const tickHolidays = async () => {
 
     if ((month === 12 && day === 9) || (month === 3 && day === 21)) {
       const usersRes = await pool.query(
-        `SELECT u.phone, u.last_vacation_year
-         FROM users u
+        `SELECT u.phone, u.last_vacation_year FROM users u
          WHERE u.status <> 'ПР'
          AND EXISTS (SELECT 1 FROM professions p WHERE p.phone = u.phone)`
       );
       let count = 0;
       for (const u of usersRes.rows) {
         if (u.last_vacation_year === year) continue;
-        await pool.query(
-          'UPDATE users SET tonki = tonki + 10, last_vacation_year = $1 WHERE phone = $2',
-          [year, u.phone]
-        );
+        await pool.query('UPDATE users SET tonki = tonki + 10, last_vacation_year = $1 WHERE phone = $2', [year, u.phone]);
+        await createNotification(u.phone, 'reward', '🏖️ Отпуск', '+10₮', 'rewards', null);
         count++;
       }
       if (count > 0) await sendSystemMsg(`🏖️ Отпуск! +10 ₮ работающим ЖИ (${count} чел.)`);
@@ -3214,459 +3866,29 @@ const tickHolidays = async () => {
 
     const inSummerWindow =
       (month === 5 && day >= 23) ||
-      (month === 6) ||
-      (month === 7) ||
+      (month === 6) || (month === 7) ||
       (month === 8 && day <= 23);
 
     if (inSummerWindow) {
       const usersRes = await pool.query(
-        `SELECT u.phone, u.last_burmaldeem_month
-         FROM users u
+        `SELECT u.phone, u.last_burmaldeem_month FROM users u
          WHERE u.status <> 'ПР'
          AND EXISTS (SELECT 1 FROM professions p WHERE p.phone = u.phone)`
       );
       let count = 0;
       for (const u of usersRes.rows) {
         if (u.last_burmaldeem_month === monthKey) continue;
-        await pool.query(
-          'UPDATE users SET tonki = tonki + 40, last_burmaldeem_month = $1 WHERE phone = $2',
-          [monthKey, u.phone]
-        );
+        await pool.query('UPDATE users SET tonki = tonki + 40, last_burmaldeem_month = $1 WHERE phone = $2', [monthKey, u.phone]);
+        await createNotification(u.phone, 'reward', '☀️ Летние бурмалдим', '+40₮', 'rewards', null);
         count++;
       }
       if (count > 0) await sendSystemMsg(`☀️ Летние бурмалдим! +40 ₮ работающим ЖИ (${count} чел.)`);
     }
-  } catch (err) {
-    console.error('tickHolidays:', err.message);
-  }
+  } catch (err) { console.error('tickHolidays:', err.message); }
 };
 
 setInterval(tickHolidays, 60 * 60 * 1000);
 setTimeout(tickHolidays, 10 * 1000);
-
-// ═══════════════════════════════════════════════════════
-// АВТО-НАГРАДЫ (5.7, 5.11, 5.12)
-// ═══════════════════════════════════════════════════════
-const tickAutoRewards = async () => {
-  try {
-    // ═══ 5.7 Богач: > 300 ₮ → +2000 ауры (один раз) ═══
-    const richRes = await pool.query(`
-      SELECT phone, first_name, last_name, tonki, aura
-      FROM users
-      WHERE status <> 'ПР'
-        AND tonki > 300
-        AND last_rich_reward = false
-    `);
-    for (const u of richRes.rows) {
-      await pool.query(
-        'UPDATE users SET aura = COALESCE(aura, 0) + 2000, last_rich_reward = true WHERE phone = $1',
-        [u.phone]
-      );
-      await pool.query(
-        `INSERT INTO aura_history (id, phone, delta, reason, date)
-         VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO NOTHING`,
-        [
-          Date.now() + Math.floor(Math.random() * 100000),
-          u.phone,
-          2000,
-          '💰 Богач (п. 5.7) — набрал >300₮',
-          new Date().toLocaleString('ru-RU')
-        ]
-      );
-      await pool.query(
-        `INSERT INTO messages (id, from_phone, from_name, from_avatar, from_status, text, time, date)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-        [
-          Date.now() + Math.floor(Math.random() * 100000),
-          'system',
-          '🎁 Награды',
-          null,
-          'БОТ',
-          `${u.first_name} ${u.last_name} получил награду «💰 Богач» (+2000 ауры) за >300₮`,
-          new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }),
-          new Date().toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })
-        ]
-      );
-    }
-
-    // ═══ 5.11 Топ 1: 2 дня подряд топ по ауре → +10₮ +500 ауры ═══
-    const today = new Date().toISOString().slice(0, 10);
-    const top1Res = await pool.query(`
-      SELECT phone, first_name, last_name, aura, top1_streak, last_top1_check, last_rich_reward
-      FROM users
-      WHERE status <> 'ПР'
-      ORDER BY aura DESC
-      LIMIT 1
-    `);
-    if (top1Res.rows.length > 0) {
-      const top1 = top1Res.rows[0];
-      if (top1.last_top1_check !== today) {
-        const newStreak = (top1.top1_streak || 0) + 1;
-        await pool.query(
-          'UPDATE users SET top1_streak = $1, last_top1_check = $2 WHERE phone = $3',
-          [newStreak, today, top1.phone]
-        );
-
-        if (newStreak >= 2) {
-          // Обнуляем streak у других (они больше не топ-1)
-          await pool.query(
-            'UPDATE users SET top1_streak = 0 WHERE phone <> $1 AND status <> $2',
-            [top1.phone, 'ПР']
-          );
-
-          // Выдаём награду раз в день, если топ-1 держится 2+ дня
-          const alreadyRewardedToday = await pool.query(
-            `SELECT id FROM aura_history
-             WHERE phone = $1 AND reason LIKE '%Топ 1%'
-             AND date >= $2`,
-            [top1.phone, new Date().toISOString().slice(0, 10)]
-          );
-          if (alreadyRewardedToday.rows.length === 0) {
-            await pool.query(
-              'UPDATE users SET tonki = tonki + 10, aura = COALESCE(aura, 0) + 500 WHERE phone = $1',
-              [top1.phone]
-            );
-            await pool.query(
-              `INSERT INTO aura_history (id, phone, delta, reason, date)
-               VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO NOTHING`,
-              [
-                Date.now() + Math.floor(Math.random() * 100000),
-                top1.phone,
-                500,
-                '🏆 Топ 1 (п. 5.11) — 2+ дня на первом месте',
-                new Date().toLocaleString('ru-RU')
-              ]
-            );
-            await pool.query(
-              `INSERT INTO messages (id, from_phone, from_name, from_avatar, from_status, text, time, date)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-              [
-                Date.now() + Math.floor(Math.random() * 100000),
-                'system',
-                '🎁 Награды',
-                null,
-                'БОТ',
-                `🏆 ${top1.first_name} ${top1.last_name} — Топ 1 уже ${newStreak} дн. (+10₮, +500 ауры)`,
-                new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }),
-                new Date().toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })
-              ]
-            );
-          }
-        }
-      }
-    }
-
-    // ═══ 5.12 Главный пенсионер: 3 месяца на пенсии → +20₮ +1000 ауры ═══
-    const pensionRes = await pool.query(`
-      SELECT phone, first_name, last_name, pension_started_at
-      FROM users
-      WHERE has_pension = true
-        AND last_pensioner_reward = false
-        AND pension_started_at IS NOT NULL
-        AND pension_started_at < NOW() - INTERVAL '90 days'
-    `);
-    for (const u of pensionRes.rows) {
-      await pool.query(
-        'UPDATE users SET tonki = tonki + 20, aura = COALESCE(aura, 0) + 1000, last_pensioner_reward = true WHERE phone = $1',
-        [u.phone]
-      );
-      await pool.query(
-        `INSERT INTO aura_history (id, phone, delta, reason, date)
-         VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO NOTHING`,
-        [
-          Date.now() + Math.floor(Math.random() * 100000),
-          u.phone,
-          1000,
-          '👴 Главный пенсионер (п. 5.12) — 3 месяца на пенсии',
-          new Date().toLocaleString('ru-RU')
-        ]
-      );
-      await pool.query(
-        `INSERT INTO messages (id, from_phone, from_name, from_avatar, from_status, text, time, date)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-        [
-          Date.now() + Math.floor(Math.random() * 100000),
-          'system',
-          '🎁 Награды',
-          null,
-          'БОТ',
-          `👴 ${u.first_name} ${u.last_name} — Главный пенсионер! (+20₮, +1000 ауры)`,
-          new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }),
-          new Date().toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })
-        ]
-      );
-    }
-
-    // ═══ Записываем pension_started_at при первой выдаче пенсии ═══
-    await pool.query(`
-      UPDATE users
-      SET pension_started_at = NOW()
-      WHERE has_pension = true
-        AND pension_started_at IS NULL
-    `);
-  } catch (err) {
-    console.error('tickAutoRewards:', err.message);
-  }
-};
-
-// ═══════════════════════════════════════════════════════
-// АВТО-ШТРАФЫ (по крону)
-// ═══════════════════════════════════════════════════════
-const tickAutoFines = async () => {
-  try {
-    const now = Date.now();
-    const DAY = 24 * 60 * 60 * 1000;
-
-    const usersRes = await pool.query('SELECT * FROM users WHERE status <> $1', ['ПР']);
-
-    for (const u of usersRes.rows) {
-      if (u.is_banned) continue;
-
-      const FINE_COOLDOWN = 6 * 60 * 60 * 1000; // 6 часов между автоштрафами одного типа
-
-      // ═══ 1. НЕАКТИВНОСТЬ (п. 3.3) ═══
-      const lastSeen = u.last_seen_at ? new Date(u.last_seen_at).getTime() : 0;
-      const daysSinceSeen = lastSeen ? (now - lastSeen) / DAY : 999;
-      const lastInactive = u.last_auto_inactive_at ? new Date(u.last_auto_inactive_at).getTime() : 0;
-      if (daysSinceSeen >= 14 && (now - lastInactive) > FINE_COOLDOWN) {
-        await applyAutoFine(u, {
-          reason: '💤 Неактивность (п. 3.3)',
-          fineAmount: 0,
-          auraDelta: -400,
-          stampDays: 2,
-          stampReason: '3.3 — Неактивность (2 нед без захода)',
-          cooldownField: 'last_auto_inactive_at',
-        });
-      }
-
-      // ═══ 2. НАЛОГИ (п. 3.11) ═══
-      const lastTax = u.last_tax_paid_at ? new Date(u.last_tax_paid_at).getTime() : 0;
-      const daysSinceTax = lastTax ? (now - lastTax) / DAY : 999;
-      const lastTaxFine = u.last_auto_tax_at ? new Date(u.last_auto_tax_at).getTime() : 0;
-      if (daysSinceTax >= 4 && (now - lastTaxFine) > FINE_COOLDOWN) {
-        await applyAutoFine(u, {
-          reason: '📋 Налоги не оплачены (п. 3.11)',
-          fineAmount: 5,
-          auraDelta: -150,
-          cooldownField: 'last_auto_tax_at',
-        });
-      }
-
-      // ═══ 3. БЕЗДЕЛЬНИЧЕСТВО (п. 3.6) ═══
-      const profsRes = await pool.query(
-        'SELECT * FROM professions WHERE phone = $1',
-        [u.phone]
-      );
-      const lastIdle = u.last_auto_idle_at ? new Date(u.last_auto_idle_at).getTime() : 0;
-      for (const p of profsRes.rows) {
-        const lastPaid = p.last_paid_at ? new Date(p.last_paid_at).getTime() : 0;
-        const daysSincePay = lastPaid ? (now - lastPaid) / DAY : 999;
-        if (daysSincePay >= 3 && (now - lastIdle) > FINE_COOLDOWN) {
-          await applyAutoFine(u, {
-            reason: `🚫 Бездельничество (п. 3.6) — ${p.profession}`,
-            fineAmount: 10,
-            auraDelta: -100,
-            cooldownField: 'last_auto_idle_at',
-          });
-          break;
-        }
-      }
-
-      // ═══ 4. КРЕДИТ ПРОСРОЧЕН (п. 3.10) ═══
-      const creditsRes = await pool.query(
-        `SELECT * FROM credits WHERE user_phone = $1 AND status = 'active'`,
-        [u.phone]
-      );
-      const lastCredit = u.last_auto_credit_at ? new Date(u.last_auto_credit_at).getTime() : 0;
-      for (const c of creditsRes.rows) {
-        if (c.due_date && new Date(c.due_date).getTime() < now && (now - lastCredit) > FINE_COOLDOWN) {
-          const remaining = c.total_due - (c.paid || 0);
-          await applyAutoFine(u, {
-            reason: `💳 Кредит просрочен (п. 3.10) — ${remaining}₮`,
-            fineAmount: 0,
-            auraDelta: -300,
-            stampDays: 30,
-            stampReason: '3.10 — Кредит не возвращён',
-            cooldownField: 'last_auto_credit_at',
-          });
-          break;
-        }
-      }
-
-      // ═══ 5. ДОЛЖНИК (п. 3.17) — баланс < -200 ₮ ═══
-      const lastDebtor = u.last_auto_debtor_at ? new Date(u.last_auto_debtor_at).getTime() : 0;
-      if (u.tonki < -200 && (now - lastDebtor) > FINE_COOLDOWN) {
-        // Простительное выселение + 50₮
-        await pool.query(
-          `UPDATE users SET
-            is_banned = true,
-            ban_type = 'forgiving',
-            ban_reason = '3.17 — Должник (баланс -200₮ и ниже)',
-            tonki = 50,
-            last_auto_debtor_at = NOW()
-          WHERE phone = $1`,
-          [u.phone]
-        );
-        await pool.query(
-          `INSERT INTO messages (id, from_phone, from_name, from_avatar, from_status, text, time, date)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-          [
-            Date.now() + Math.floor(Math.random() * 100000),
-            'system',
-            '⚠️ Автоштраф',
-            null,
-            'БОТ',
-            `🕊️ ${u.first_name} ${u.last_name} выселен по п. 3.17 (баланс -200₮) + выдан 50₮`,
-            new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }),
-            new Date().toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })
-          ]
-        );
-      }
-    }
-  } catch (err) {
-    console.error('tickAutoFines:', err.message);
-  }
-};
-
-// Вспомогательная функция — применяет автоштраф
-const applyAutoFine = async (user, opts) => {
-  try {
-    // Штраф
-    if (opts.fineAmount > 0) {
-      await pool.query(
-        `INSERT INTO fines (id, phone, reason, amount, from_phone, from_name, date, paid)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, false)`,
-        [
-          Date.now() + Math.floor(Math.random() * 1000),
-          user.phone,
-          opts.reason,
-          opts.fineAmount,
-          'auto',
-          '🤖 Авто',
-          new Date().toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
-        ]
-      );
-    }
-
-    // Аура
-    if (opts.auraDelta && opts.auraDelta !== 0) {
-      const newAura = (user.aura || 0) + opts.auraDelta;
-      let newStatus = user.status;
-      if (user.status === 'ПМ' && newAura < 9800) {
-        newStatus = 'ЖИ';
-      }
-      await pool.query(
-        'UPDATE users SET aura = $1, status = $2 WHERE phone = $3',
-        [newAura, newStatus, user.phone]
-      );
-      await pool.query(
-        `INSERT INTO aura_history (id, phone, delta, reason, date)
-         VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO NOTHING`,
-        [
-          Date.now() + Math.floor(Math.random() * 1000),
-          user.phone,
-          opts.auraDelta,
-          `⚠️ Автоштраф: ${opts.reason}`,
-          new Date().toLocaleString('ru-RU')
-        ]
-      );
-    }
-
-    // Штамм
-    if (opts.stampDays) {
-      const until = new Date(Date.now() + opts.stampDays * 24 * 60 * 60 * 1000).toISOString();
-      await pool.query(
-        `UPDATE users SET is_banned = false, ban_reason = $1, ban_type = 'stamp', stamp_until = $2 WHERE phone = $3`,
-        [opts.stampReason, until, user.phone]
-      );
-    }
-
-    // Отметка о применении
-    if (opts.cooldownField) {
-      await pool.query(
-        `UPDATE users SET ${opts.cooldownField} = NOW() WHERE phone = $1`,
-        [user.phone]
-      );
-    }
-
-    // Сообщение в чат
-    await pool.query(
-      `INSERT INTO messages (id, from_phone, from_name, from_avatar, from_status, text, time, date)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-      [
-        Date.now() + Math.floor(Math.random() * 100000),
-        'system',
-        '⚠️ Автоштраф',
-        null,
-        'БОТ',
-        `${user.first_name} ${user.last_name}: ${opts.reason}${opts.fineAmount > 0 ? ` · ${opts.fineAmount}₮` : ''}${opts.auraDelta ? ` · ${opts.auraDelta} ауры` : ''}${opts.stampDays ? ` · штамм ${opts.stampDays} дн.` : ''}`,
-        new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }),
-        new Date().toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })
-      ]
-    );
-  } catch (err) {
-    console.error('applyAutoFine error:', err.message, 'for', user.phone);
-  }
-};
-
-// ═══ Запуск кронов ═══
-setInterval(tickAutoRewards, 60 * 60 * 1000);       // раз в час
-setTimeout(tickAutoRewards, 30 * 1000);             // при запуске через 30 сек
-
-// ═══════════════════════════════════════════════════════
-// АВТО-НАГРАДА 5.13 — ФАРМ АУРЫ
-// ═══════════════════════════════════════════════════════
-const tickFarmAura = async () => {
-  try {
-    // У кого аура >= 12000 и флаг не выставлен → выдаём «скидку»
-    const res = await pool.query(`
-      SELECT phone, first_name, last_name, aura
-      FROM users
-      WHERE status <> 'ПР'
-        AND aura >= 12000
-        AND farm_aura_applied = false
-    `);
-
-    for (const u of res.rows) {
-      await pool.query(
-        'UPDATE users SET farm_aura_applied = true WHERE phone = $1',
-        [u.phone]
-      );
-      await pool.query(
-        `INSERT INTO messages (id, from_phone, from_name, from_avatar, from_status, text, time, date)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-        [
-          Date.now() + Math.floor(Math.random() * 100000),
-          'system',
-          '💎 Фарм ауры',
-          null,
-          'БОТ',
-          `💎 ${u.first_name} ${u.last_name} достиг ауры 12000+! Скидка 1₮ на всё (кроме налогов) — п. 5.13`,
-          new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }),
-          new Date().toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })
-        ]
-      );
-    }
-
-    // Если аура упала ниже 12000 — снимаем скидку
-    await pool.query(`
-      UPDATE users
-      SET farm_aura_applied = false
-      WHERE status <> 'ПР'
-        AND aura < 12000
-        AND farm_aura_applied = true
-    `);
-  } catch (err) {
-    console.error('tickFarmAura:', err.message);
-  }
-};
-
-// Запуск раз в час
-setInterval(tickFarmAura, 60 * 60 * 1000);
-setTimeout(tickFarmAura, 20 * 1000);
-
-setInterval(tickAutoFines, 6 * 60 * 60 * 1000);     // раз в 6 часов
-setTimeout(tickAutoFines, 60 * 1000);               // при запуске через 1 мин
 
 // ═══════════════════════════════════════════════════════
 // ЗАПУСК
