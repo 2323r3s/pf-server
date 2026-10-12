@@ -519,19 +519,19 @@ if (u.status === 'ЗМ') {
 }
 
     await pool.query(
-      `INSERT INTO users (phone, login, password, first_name, last_name, code, paradox, tripcode, status, aura, tonki, avatar, has_pension, has_insurance, insurance_until, is_banned, ban_reason, ban_type, stamp_until, has_created_party)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
+      `INSERT INTO users (phone, login, password, first_name, last_name, code, paradox, tripcode, status, aura, tonki, avatar, has_pension, has_insurance, insurance_until, is_banned, ban_reason, ban_type, stamp_until, has_created_party, bio)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
        ON CONFLICT (phone) DO UPDATE SET
          login=$2, password=$3, first_name=$4, last_name=$5, code=$6,
          paradox=$7, tripcode=$8, status=$9, aura=$10, tonki=$11, avatar=$12,
          has_pension=$13, has_insurance=$14, insurance_until=$15,
          is_banned=$16, ban_reason=$17, ban_type=$18, stamp_until=$19,
-         has_created_party=$20`,
+         has_created_party=$20, bio=$21`,
       [u.phone, u.login, u.password, u.firstName, u.lastName, u.code, u.paradox,
        u.tripcode, u.status, u.aura, u.tonki, u.avatar,
        u.hasPension || false, u.hasInsurance || false, u.insuranceUntil || null,
        u.isBanned || false, u.banReason || null, u.banType || null, u.stampUntil || null,
-       u.hasCreatedParty || false]
+       u.hasCreatedParty || false, u.bio || null]
     );
 
     if (demoted) {
