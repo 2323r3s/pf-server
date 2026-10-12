@@ -43,24 +43,6 @@ const initDB = async () => {
         has_created_party BOOLEAN DEFAULT false
       )
     `);
-
-        await pool.query(`
-      CREATE TABLE IF NOT EXISTS debts (
-        id BIGINT PRIMARY KEY,
-        debtor_phone TEXT NOT NULL,
-        debtor_name TEXT NOT NULL,
-        creditor_phone TEXT NOT NULL,
-        creditor_name TEXT NOT NULL,
-        amount INTEGER NOT NULL,
-        reason TEXT NOT NULL,
-        due_date TIMESTAMP NOT NULL,
-        status TEXT DEFAULT 'active',
-        created_at TIMESTAMP DEFAULT NOW(),
-        paid_at TIMESTAMP,
-        created_by TEXT
-      )
-    `);
-    
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS has_pension BOOLEAN DEFAULT false`);
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS has_insurance BOOLEAN DEFAULT false`);
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS insurance_until TIMESTAMP`);
@@ -69,6 +51,13 @@ const initDB = async () => {
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS ban_type TEXT`);
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS stamp_until TIMESTAMP`);
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS has_created_party BOOLEAN DEFAULT false`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMP DEFAULT NOW()`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_tax_paid_at TIMESTAMP`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_okpf_day_year INTEGER`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_pf_day_year INTEGER`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_vacation_year INTEGER`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_burmaldeem_month TEXT`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS bio TEXT`);
 
     await pool.query(`
       CREATE TABLE IF NOT EXISTS news (
@@ -127,8 +116,6 @@ const initDB = async () => {
     `);
 
     await pool.query(`CREATE TABLE IF NOT EXISTS docs (key TEXT PRIMARY KEY, content TEXT NOT NULL)`);
-
-    // ═══ ЛЕТОПИСЬ ПФ (п. 7.13) ═══
     await pool.query(`CREATE TABLE IF NOT EXISTS chronicle (id INTEGER PRIMARY KEY DEFAULT 1, content TEXT)`);
 
     await pool.query(`
@@ -301,7 +288,6 @@ const initDB = async () => {
       )
     `);
 
-    // ═══ ПРОФЕССИИ ═══
     await pool.query(`
       CREATE TABLE IF NOT EXISTS professions (
         phone TEXT NOT NULL,
@@ -338,7 +324,6 @@ const initDB = async () => {
       )
     `);
 
-    // ═══ ПАРТИИ ═══
     await pool.query(`
       CREATE TABLE IF NOT EXISTS parties (
         id BIGINT PRIMARY KEY,
@@ -392,18 +377,6 @@ const initDB = async () => {
     `);
 
     await pool.query(`
-      CREATE TABLE IF NOT EXISTS achievements (
-        id BIGINT PRIMARY KEY,
-        phone TEXT NOT NULL,
-        achievement_id TEXT NOT NULL,
-        granted_at TIMESTAMP DEFAULT NOW(),
-        granted_by TEXT,
-        UNIQUE (phone, achievement_id)
-      )
-    `);
-
-    // ═══ ЖУРНАЛ СБРОСОВ ПАРОЛЯ ═══
-    await pool.query(`
       CREATE TABLE IF NOT EXISTS password_resets (
         id BIGINT PRIMARY KEY,
         user_phone TEXT NOT NULL,
@@ -414,20 +387,33 @@ const initDB = async () => {
       )
     `);
 
-    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMP DEFAULT NOW()`);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS debts (
+        id BIGINT PRIMARY KEY,
+        debtor_phone TEXT NOT NULL,
+        debtor_name TEXT NOT NULL,
+        creditor_phone TEXT NOT NULL,
+        creditor_name TEXT NOT NULL,
+        amount INTEGER NOT NULL,
+        reason TEXT NOT NULL,
+        due_date TIMESTAMP NOT NULL,
+        status TEXT DEFAULT 'active',
+        created_at TIMESTAMP DEFAULT NOW(),
+        paid_at TIMESTAMP,
+        created_by TEXT
+      )
+    `);
 
-    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS bio TEXT`);
-
-    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_tax_paid_at TIMESTAMP`);
-
-    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_okpf_day_year INTEGER`);
-
-    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_pf_day_year INTEGER`);
-
-    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_vacation_year INTEGER`);
-
-    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_burmaldeem_month TEXT`);
-
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS achievements (
+        id BIGINT PRIMARY KEY,
+        phone TEXT NOT NULL,
+        achievement_id TEXT NOT NULL,
+        granted_at TIMESTAMP DEFAULT NOW(),
+        granted_by TEXT,
+        UNIQUE (phone, achievement_id)
+      )
+    `);
 
     console.log('✅ Таблицы готовы');
   } catch (err) {
@@ -460,29 +446,6 @@ app.post('/api/users/tax_paid', async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════
-// РЕЙТИНГ
-// ═══════════════════════════════════════════════════════
-app.get('/api/leaderboard', async (req, res) => {
-  try {
-    const r = await pool.query(`
-      SELECT phone, first_name, last_name, status, aura, tonki, avatar
-      FROM users
-      WHERE status <> 'ПР'
-      ORDER BY aura DESC
-    `);
-    res.json(r.rows.map(u => ({
-      phone: u.phone,
-      firstName: u.first_name,
-      lastName: u.last_name,
-      status: u.status,
-      aura: u.aura,
-      tonki: u.tonki,
-      avatar: u.avatar,
-    })));
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// ═══════════════════════════════════════════════════════
 // ПОЛЬЗОВАТЕЛИ
 // ═══════════════════════════════════════════════════════
 app.get('/api/users', async (req, res) => {
@@ -496,27 +459,25 @@ app.post('/api/users', async (req, res) => {
   try {
     const u = req.body;
 
-    // ═══ АВТОПОНИЖЕНИЕ ПМ → ЖИ при ауре < 9800 (п. 2.5) ═══
     let demoted = false;
     if (u.status === 'ПМ' && (u.aura || 0) < 9800) {
       u.status = 'ЖИ';
       demoted = true;
     }
 
-    // ═══ ЗМ МАКСИМУМ 2 (п. 1.3) ═══
-if (u.status === 'ЗМ') {
-  const currentRes = await pool.query(
-    'SELECT status FROM users WHERE phone=$1',
-    [u.phone]
-  );
-  const wasZM = currentRes.rows[0]?.status === 'ЗМ';
-  if (!wasZM) {
-    const cntRes = await pool.query("SELECT COUNT(*) FROM users WHERE status='ЗМ'");
-    if (parseInt(cntRes.rows[0].count) >= 2) {
-      return res.status(400).json({ error: 'Максимум 2 ЗМ в подвале (п. 1.3)' });
+    if (u.status === 'ЗМ') {
+      const currentRes = await pool.query(
+        'SELECT status FROM users WHERE phone=$1',
+        [u.phone]
+      );
+      const wasZM = currentRes.rows[0]?.status === 'ЗМ';
+      if (!wasZM) {
+        const cntRes = await pool.query("SELECT COUNT(*) FROM users WHERE status='ЗМ'");
+        if (parseInt(cntRes.rows[0].count) >= 2) {
+          return res.status(400).json({ error: 'Максимум 2 ЗМ в подвале (п. 1.3)' });
+        }
+      }
     }
-  }
-}
 
     await pool.query(
       `INSERT INTO users (phone, login, password, first_name, last_name, code, paradox, tripcode, status, aura, tonki, avatar, has_pension, has_insurance, insurance_until, is_banned, ban_reason, ban_type, stamp_until, has_created_party, bio)
@@ -564,10 +525,8 @@ app.post('/api/users/bonus_aura', async (req, res) => {
     if (u.status === 'ПР') return res.status(400).json({ error: 'ПР не получает ауру' });
 
     const newAura = (u.aura || 0) + delta;
-
     await pool.query('UPDATE users SET aura=$1 WHERE phone=$2', [newAura, phone]);
 
-    // ═══ АВТОПОНИЖЕНИЕ ПМ → ЖИ при ауре < 9800 (п. 2.5) ═══
     let finalStatus = u.status;
     let demoted = false;
     if (u.status === 'ПМ' && newAura < 9800) {
@@ -876,7 +835,6 @@ app.post('/api/professions/pay_salary', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// ═══ ВЫПЛАТА ЗАРПЛАТЫ СТАТУСА (ПВ/ЗМ/ПЗ/Пенсия) ═══
 app.post('/api/status_salary/pay', async (req, res) => {
   try {
     const { phone, amount, paidBy } = req.body;
@@ -884,13 +842,13 @@ app.post('/api/status_salary/pay', async (req, res) => {
       return res.status(400).json({ error: 'Bad params' });
     }
 
-    // Проверяем что юзер реально имеет право на эту ЗП
     const uRes = await pool.query('SELECT * FROM users WHERE phone=$1', [phone]);
     if (uRes.rows.length === 0) return res.status(404).json({ error: 'User not found' });
     const u = uRes.rows[0];
 
     let expectedAmount = 0;
-    if (u.has_pension) expectedAmount = 15;
+    if (u.has_pension) expectedAmount = 12;
+    else if (u.status === 'МП') expectedAmount = 5;
     else if (['ПВ', 'ЗМ', 'ПЗ'].includes(u.status)) expectedAmount = 10;
     else return res.status(400).json({ error: 'У этого ЖИ нет зарплаты статуса' });
 
@@ -898,7 +856,6 @@ app.post('/api/status_salary/pay', async (req, res) => {
       return res.status(400).json({ error: `Сумма должна быть ${expectedAmount} ₮` });
     }
 
-    // Списываем из казны ПФ
     const bankRes = await pool.query('SELECT amount FROM bank_pf WHERE id=1');
     const bankAmount = parseInt(bankRes.rows[0]?.amount || 0);
     if (bankAmount < amount) {
@@ -906,17 +863,14 @@ app.post('/api/status_salary/pay', async (req, res) => {
     }
     await pool.query('UPDATE bank_pf SET amount=amount-$1 WHERE id=1', [amount]);
 
-    // Начисляем ЖИ
     await pool.query('UPDATE users SET tonki=tonki+$1 WHERE phone=$2', [amount, phone]);
 
-    // Записываем в историю salary_paid
     await pool.query(
       `INSERT INTO salary_paid (phone, last_paid) VALUES ($1, $2)
        ON CONFLICT (phone) DO UPDATE SET last_paid=$2`,
       [phone, new Date().toISOString()]
     );
 
-    // Пишем в общий чат
     const reason = u.has_pension ? 'Пенсия' : `Зарплата ${u.status}`;
     await pool.query(
       `INSERT INTO messages (id, from_phone, from_name, from_avatar, from_status, text, time, date)
@@ -1298,75 +1252,6 @@ app.get('/api/casino/permissions', async (req, res) => {
   try {
     const r = await pool.query('SELECT * FROM casino_permission');
     res.json(r.rows.map(x => ({ phone: x.phone, grantedAt: x.granted_at, grantedBy: x.granted_by })));
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// ═══════════════════════════════════════════════════════
-// ДОЛГИ
-// ═══════════════════════════════════════════════════════
-app.get('/api/debts', async (req, res) => {
-  try {
-    const r = await pool.query('SELECT * FROM debts ORDER BY id DESC');
-    res.json(r.rows.map(d => ({
-      id: d.id,
-      debtorPhone: d.debtor_phone,
-      debtorName: d.debtor_name,
-      creditorPhone: d.creditor_phone,
-      creditorName: d.creditor_name,
-      amount: d.amount,
-      reason: d.reason,
-      dueDate: d.due_date,
-      status: d.status,
-      createdAt: d.created_at,
-      paidAt: d.paid_at,
-      createdBy: d.created_by,
-    })));
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.post('/api/debts', async (req, res) => {
-  try {
-    const d = req.body;
-    if (!d.debtorPhone || !d.creditorPhone || !d.amount || !d.reason || !d.dueDate) {
-      return res.status(400).json({ error: 'Bad params' });
-    }
-    const id = Date.now();
-    await pool.query(
-      `INSERT INTO debts (id, debtor_phone, debtor_name, creditor_phone, creditor_name, amount, reason, due_date, status, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'active',$9)`,
-      [id, d.debtorPhone, d.debtorName, d.creditorPhone, d.creditorName, d.amount, d.reason, d.dueDate, d.createdBy || null]
-    );
-    res.json({ ok: true, id });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.post('/api/debts/:id/pay', async (req, res) => {
-  try {
-    const now = new Date().toISOString();
-    const r = await pool.query(
-      `UPDATE debts SET status='paid', paid_at=$1 WHERE id=$2 RETURNING id`,
-      [now, req.params.id]
-    );
-    if (r.rows.length === 0) return res.status(404).json({ error: 'Not found' });
-    res.json({ ok: true, paidAt: now });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.delete('/api/debts/:id', async (req, res) => {
-  try {
-    const { deletedBy, deletedByPhone } = req.body;
-    const debtRes = await pool.query('SELECT * FROM debts WHERE id=$1', [req.params.id]);
-    if (debtRes.rows.length === 0) return res.status(404).json({ error: 'Not found' });
-    const debt = debtRes.rows[0];
-
-    const uRes = await pool.query('SELECT status FROM users WHERE phone=$1', [deletedByPhone]);
-    const isPR = uRes.rows.length > 0 && uRes.rows[0].status === 'ПР';
-    const isCreator = debt.created_by === deletedBy;
-
-    if (!isPR && !isCreator) return res.status(403).json({ error: 'Нет прав' });
-
-    await pool.query('DELETE FROM debts WHERE id=$1', [req.params.id]);
-    res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -1785,7 +1670,7 @@ app.post('/api/docs', async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════
-// ЛЕТОПИСЬ ПФ (п. 7.13)
+// ЛЕТОПИСЬ ПФ
 // ═══════════════════════════════════════════════════════
 app.get('/api/chronicle', async (req, res) => {
   try {
@@ -1976,7 +1861,7 @@ app.post('/api/doc_requests/:id/resolve', async (req, res) => {
           [request.user_phone, new Date().toISOString(), resolvedBy || 'ПР']
         );
       } else if (request.doc_type === 'pm_status') {
-        // ПР ставит статус ВРУЧНУЮ через 👥 Данные ЖИ → карточка → 🏷️ Статус.
+        // ПР ставит статус ВРУЧНУЮ через 👥 Данные ЖИ
       }
     }
     res.json({ ok: true });
@@ -2037,8 +1922,8 @@ app.post('/api/parties', async (req, res) => {
     }
 
     const cntRes = await pool.query('SELECT COUNT(*) FROM parties');
-    if (parseInt(cntRes.rows[0].count) >= 3) {
-      return res.status(400).json({ error: 'Максимум 3 партии в ПФ' });
+    if (parseInt(cntRes.rows[0].count) >= 4) {
+      return res.status(400).json({ error: 'Максимум 4 партии в ПФ' });
     }
 
     const dupRes = await pool.query('SELECT id FROM parties WHERE LOWER(name)=LOWER($1)', [trimmed]);
@@ -2317,6 +2202,98 @@ app.post('/api/party_messages', async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════
+// ДОЛГИ
+// ═══════════════════════════════════════════════════════
+app.get('/api/debts', async (req, res) => {
+  try {
+    const r = await pool.query('SELECT * FROM debts ORDER BY id DESC');
+    res.json(r.rows.map(d => ({
+      id: d.id,
+      debtorPhone: d.debtor_phone,
+      debtorName: d.debtor_name,
+      creditorPhone: d.creditor_phone,
+      creditorName: d.creditor_name,
+      amount: d.amount,
+      reason: d.reason,
+      dueDate: d.due_date,
+      status: d.status,
+      createdAt: d.created_at,
+      paidAt: d.paid_at,
+      createdBy: d.created_by,
+    })));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/debts', async (req, res) => {
+  try {
+    const d = req.body;
+    if (!d.debtorPhone || !d.creditorPhone || !d.amount || !d.reason || !d.dueDate) {
+      return res.status(400).json({ error: 'Bad params' });
+    }
+    const id = Date.now();
+    await pool.query(
+      `INSERT INTO debts (id, debtor_phone, debtor_name, creditor_phone, creditor_name, amount, reason, due_date, status, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'active',$9)`,
+      [id, d.debtorPhone, d.debtorName, d.creditorPhone, d.creditorName, d.amount, d.reason, d.dueDate, d.createdBy || null]
+    );
+    res.json({ ok: true, id });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/debts/:id/pay', async (req, res) => {
+  try {
+    const now = new Date().toISOString();
+    const r = await pool.query(
+      `UPDATE debts SET status='paid', paid_at=$1 WHERE id=$2 RETURNING id`,
+      [now, req.params.id]
+    );
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    res.json({ ok: true, paidAt: now });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/debts/:id', async (req, res) => {
+  try {
+    const { deletedBy, deletedByPhone } = req.body;
+    const debtRes = await pool.query('SELECT * FROM debts WHERE id=$1', [req.params.id]);
+    if (debtRes.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    const debt = debtRes.rows[0];
+
+    const uRes = await pool.query('SELECT status FROM users WHERE phone=$1', [deletedByPhone]);
+    const isPR = uRes.rows.length > 0 && uRes.rows[0].status === 'ПР';
+    const isCreator = debt.created_by === deletedBy;
+
+    if (!isPR && !isCreator) return res.status(403).json({ error: 'Нет прав' });
+
+    await pool.query('DELETE FROM debts WHERE id=$1', [req.params.id]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ═══════════════════════════════════════════════════════
+// РЕЙТИНГ
+// ═══════════════════════════════════════════════════════
+app.get('/api/leaderboard', async (req, res) => {
+  try {
+    const r = await pool.query(`
+      SELECT phone, first_name, last_name, status, aura, tonki, avatar
+      FROM users
+      WHERE status <> 'ПР'
+      ORDER BY aura DESC
+    `);
+    res.json(r.rows.map(u => ({
+      phone: u.phone,
+      firstName: u.first_name,
+      lastName: u.last_name,
+      status: u.status,
+      aura: u.aura,
+      tonki: u.tonki,
+      avatar: u.avatar,
+    })));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ═══════════════════════════════════════════════════════
 // АВТО-КУРС
 // ═══════════════════════════════════════════════════════
 const tickRate = async () => {
@@ -2363,7 +2340,7 @@ setTimeout(tickRate, 5000);
 const tickHolidays = async () => {
   try {
     const now = new Date();
-    const month = now.getMonth() + 1; // 1-12
+    const month = now.getMonth() + 1;
     const day = now.getDate();
     const year = now.getFullYear();
     const monthKey = `${year}-${String(month).padStart(2, '0')}`;
@@ -2385,7 +2362,6 @@ const tickHolidays = async () => {
       );
     };
 
-    // ═══ ДЕНЬ ОКПФ — 10 апреля, +10₮ ═══
     if (month === 4 && day === 10) {
       const usersRes = await pool.query(
         'SELECT phone, last_okpf_day_year FROM users WHERE status <> $1',
@@ -2403,7 +2379,6 @@ const tickHolidays = async () => {
       if (count > 0) await sendSystemMsg(`🎉 С Днём ОКПФ! +10 ₮ всем ЖИ (${count} чел.)`);
     }
 
-    // ═══ ДЕНЬ ПФ — 23 октября, +20₮ ═══
     if (month === 10 && day === 23) {
       const usersRes = await pool.query(
         'SELECT phone, last_pf_day_year FROM users WHERE status <> $1',
@@ -2421,7 +2396,6 @@ const tickHolidays = async () => {
       if (count > 0) await sendSystemMsg(`🏚️ С Днём ПФ! +20 ₮ всем ЖИ (${count} чел.)`);
     }
 
-    // ═══ ОТПУСКА — 9 декабря и 21 марта, +10₮ тем, у кого есть профессия ═══
     if ((month === 12 && day === 9) || (month === 3 && day === 21)) {
       const usersRes = await pool.query(
         `SELECT u.phone, u.last_vacation_year
@@ -2441,7 +2415,6 @@ const tickHolidays = async () => {
       if (count > 0) await sendSystemMsg(`🏖️ Отпуск! +10 ₮ работающим ЖИ (${count} чел.)`);
     }
 
-    // ═══ ЛЕТНИЕ БУРМАЛДИМ — 23 мая–23 августа, раз в месяц +40₮ работающим ═══
     const inSummerWindow =
       (month === 5 && day >= 23) ||
       (month === 6) ||
@@ -2471,8 +2444,8 @@ const tickHolidays = async () => {
   }
 };
 
-setInterval(tickHolidays, 60 * 60 * 1000);  // раз в час
-setTimeout(tickHolidays, 10 * 1000);         // при запуске через 10 сек
+setInterval(tickHolidays, 60 * 60 * 1000);
+setTimeout(tickHolidays, 10 * 1000);
 
 // ═══════════════════════════════════════════════════════
 // ЗАПУСК
