@@ -416,6 +416,80 @@ const initDB = async () => {
       )
     `);
 
+        // ═══ МЕССЕНДЖЕР 2.0 ═══
+    
+    // Реакции на любые сообщения (общий / личный / групповой / партийный)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS message_reactions (
+        id BIGINT PRIMARY KEY,
+        message_id BIGINT NOT NULL,
+        chat_type TEXT NOT NULL,
+        chat_id TEXT,
+        from_phone TEXT NOT NULL,
+        from_name TEXT NOT NULL,
+        emoji TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_reactions_msg ON message_reactions (message_id, chat_type)`);
+
+    // Reply для сообщений (добавляем колонку в существующие таблицы)
+    await pool.query(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to BIGINT`);
+    await pool.query(`ALTER TABLE private_messages ADD COLUMN IF NOT EXISTS reply_to BIGINT`);
+    await pool.query(`ALTER TABLE private_messages ADD COLUMN IF NOT EXISTS date TEXT`);
+    await pool.query(`ALTER TABLE party_messages ADD COLUMN IF NOT EXISTS reply_to BIGINT`);
+    await pool.query(`ALTER TABLE party_messages ADD COLUMN IF NOT EXISTS from_avatar TEXT`);
+    await pool.query(`ALTER TABLE party_messages ADD COLUMN IF NOT EXISTS date TEXT`);
+
+    // Группы
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS group_chats (
+        id BIGINT PRIMARY KEY,
+        name TEXT NOT NULL,
+        avatar TEXT,
+        creator_phone TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS group_members (
+        group_id BIGINT NOT NULL,
+        phone TEXT NOT NULL,
+        name TEXT NOT NULL,
+        joined_at TIMESTAMP DEFAULT NOW(),
+        PRIMARY KEY (group_id, phone)
+      )
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS group_messages (
+        id BIGINT PRIMARY KEY,
+        group_id BIGINT NOT NULL,
+        from_phone TEXT NOT NULL,
+        from_name TEXT NOT NULL,
+        from_avatar TEXT,
+        text TEXT NOT NULL,
+        reply_to BIGINT,
+        time TEXT NOT NULL,
+        date TEXT
+      )
+    `);
+
+    // Настройки чата — для каждого ЖИ свои (clear / delete / block)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS chat_settings (
+        phone TEXT NOT NULL,
+        chat_type TEXT NOT NULL,
+        chat_id TEXT NOT NULL,
+        cleared_at TIMESTAMP,
+        deleted BOOLEAN DEFAULT false,
+        blocked BOOLEAN DEFAULT false,
+        last_read_id BIGINT DEFAULT 0,
+        PRIMARY KEY (phone, chat_type, chat_id)
+      )
+    `);
+
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS pension_started_at TIMESTAMP`);
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS top1_streak INTEGER DEFAULT 0`);
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_top1_check TEXT`);
@@ -1099,6 +1173,341 @@ app.post('/api/credits/:id/pay', async (req, res) => {
     }
 
     res.json({ ok: true, paid: newPaid, remaining: credit.total_due - newPaid, closed: newStatus === 'paid' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ═══════════════════════════════════════════════════════
+// ЛИЧНЫЕ СООБЩЕНИЯ
+// ═══════════════════════════════════════════════════════
+app.get('/api/private/:chatId', async (req, res) => {
+  try {
+    const r = await pool.query(
+      'SELECT * FROM private_messages WHERE chat_id=$1 ORDER BY id ASC',
+      [req.params.chatId]
+    );
+    res.json(r.rows.map(m => ({
+      id: m.id, chatId: m.chat_id,
+      from: m.from_phone, fromName: m.from_name,
+      text: m.text, replyTo: m.reply_to,
+      time: m.time, date: m.date,
+    })));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/private', async (req, res) => {
+  try {
+    const m = req.body;
+    await pool.query(
+      `INSERT INTO private_messages (id, chat_id, from_phone, from_name, text, reply_to, time, date)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (id) DO NOTHING`,
+      [m.id, m.chatId, m.from, m.fromName, m.text || '', m.replyTo || null, m.time, m.date || null]
+    );
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Общий чат — добавить reply_to и avatar
+app.get('/api/messages', async (req, res) => {
+  try {
+    const r = await pool.query('SELECT * FROM messages ORDER BY id ASC LIMIT 200');
+    res.json(r.rows.map(m => ({
+      id: m.id, from: m.from_phone, fromName: m.from_name,
+      fromAvatar: m.from_avatar, fromStatus: m.from_status,
+      text: m.text, replyTo: m.reply_to, time: m.time, date: m.date,
+    })));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/messages', async (req, res) => {
+  try {
+    const m = req.body;
+    await pool.query(
+      `INSERT INTO messages (id, from_phone, from_name, from_avatar, from_status, text, reply_to, time, date)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (id) DO NOTHING`,
+      [m.id, m.from, m.fromName, m.fromAvatar, m.fromStatus, m.text || '', m.replyTo || null, m.time, m.date]
+    );
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ═══════════════════════════════════════════════════════
+// РЕАКЦИИ
+// ═══════════════════════════════════════════════════════
+app.get('/api/reactions', async (req, res) => {
+  try {
+    const { chat_type, chat_id, message_ids } = req.query;
+    if (!chat_type || !message_ids) return res.json([]);
+    const ids = message_ids.split(',').map(x => parseInt(x)).filter(x => !isNaN(x));
+    if (ids.length === 0) return res.json([]);
+
+    let q = `SELECT * FROM message_reactions WHERE chat_type=$1 AND message_id = ANY($2::bigint[])`;
+    let params = [chat_type, ids];
+    if (chat_id) {
+      q += ` AND chat_id=$3`;
+      params.push(chat_id);
+    }
+    const r = await pool.query(q, params);
+    res.json(r.rows.map(x => ({
+      id: x.id, messageId: x.message_id, chatType: x.chat_type, chatId: x.chat_id,
+      fromPhone: x.from_phone, fromName: x.from_name, emoji: x.emoji,
+    })));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/reactions/toggle', async (req, res) => {
+  try {
+    const { messageId, chatType, chatId, fromPhone, fromName, emoji } = req.body;
+    if (!messageId || !chatType || !fromPhone || !emoji) {
+      return res.status(400).json({ error: 'Bad params' });
+    }
+
+    // Есть ли уже такая?
+    const existing = await pool.query(
+      `SELECT id FROM message_reactions 
+       WHERE message_id=$1 AND chat_type=$2 AND COALESCE(chat_id,'')=COALESCE($3,'') 
+       AND from_phone=$4 AND emoji=$5`,
+      [messageId, chatType, chatId || null, fromPhone, emoji]
+    );
+
+    if (existing.rows.length > 0) {
+      // Убираем
+      await pool.query('DELETE FROM message_reactions WHERE id=$1', [existing.rows[0].id]);
+      return res.json({ ok: true, action: 'removed' });
+    }
+
+    // Добавляем
+    await pool.query(
+      `INSERT INTO message_reactions (id, message_id, chat_type, chat_id, from_phone, from_name, emoji)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+      [Date.now() + Math.floor(Math.random() * 1000), messageId, chatType, chatId || null, fromPhone, fromName, emoji]
+    );
+    res.json({ ok: true, action: 'added' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ═══════════════════════════════════════════════════════
+// ГРУППЫ
+// ═══════════════════════════════════════════════════════
+app.get('/api/groups', async (req, res) => {
+  try {
+    const r = await pool.query('SELECT * FROM group_chats ORDER BY created_at DESC');
+    const groups = [];
+    for (const g of r.rows) {
+      const members = await pool.query(
+        'SELECT phone, name FROM group_members WHERE group_id=$1',
+        [g.id]
+      );
+      groups.push({
+        id: g.id,
+        name: g.name,
+        avatar: g.avatar,
+        creatorPhone: g.creator_phone,
+        createdAt: g.created_at,
+        members: members.rows.map(m => ({ phone: m.phone, name: m.name })),
+      });
+    }
+    res.json(groups);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/groups', async (req, res) => {
+  try {
+    const { name, creatorPhone, creatorName, members } = req.body;
+    if (!name || !creatorPhone || !members || members.length < 1) {
+      return res.status(400).json({ error: 'Bad params' });
+    }
+    if (members.length > 20) return res.status(400).json({ error: 'Максимум 20 участников' });
+
+    const id = Date.now();
+    await pool.query(
+      `INSERT INTO group_chats (id, name, creator_phone) VALUES ($1,$2,$3)`,
+      [id, name, creatorPhone]
+    );
+
+    // Добавляем создателя
+    await pool.query(
+      `INSERT INTO group_members (group_id, phone, name) VALUES ($1,$2,$3)`,
+      [id, creatorPhone, creatorName]
+    );
+
+    // Добавляем всех участников
+    for (const m of members) {
+      if (m.phone === creatorPhone) continue;
+      await pool.query(
+        `INSERT INTO group_members (group_id, phone, name) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`,
+        [id, m.phone, m.name]
+      );
+    }
+
+    res.json({ ok: true, groupId: id });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/groups/:id/rename', async (req, res) => {
+  try {
+    const { userPhone, name } = req.body;
+    const g = await pool.query('SELECT * FROM group_chats WHERE id=$1', [req.params.id]);
+    if (g.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    if (g.rows[0].creator_phone !== userPhone) return res.status(403).json({ error: 'Только создатель' });
+
+    await pool.query('UPDATE group_chats SET name=$1 WHERE id=$2', [name, req.params.id]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/groups/:id/avatar', async (req, res) => {
+  try {
+    const { userPhone, avatar } = req.body;
+    const g = await pool.query('SELECT * FROM group_chats WHERE id=$1', [req.params.id]);
+    if (g.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    if (g.rows[0].creator_phone !== userPhone) return res.status(403).json({ error: 'Только создатель' });
+
+    await pool.query('UPDATE group_chats SET avatar=$1 WHERE id=$2', [avatar || null, req.params.id]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/groups/:id/members/add', async (req, res) => {
+  try {
+    const { userPhone, memberPhone, memberName } = req.body;
+    const g = await pool.query('SELECT * FROM group_chats WHERE id=$1', [req.params.id]);
+    if (g.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    if (g.rows[0].creator_phone !== userPhone) return res.status(403).json({ error: 'Только создатель' });
+
+    const cnt = await pool.query('SELECT COUNT(*) FROM group_members WHERE group_id=$1', [req.params.id]);
+    if (parseInt(cnt.rows[0].count) >= 20) return res.status(400).json({ error: 'Группа заполнена (20)' });
+
+    await pool.query(
+      'INSERT INTO group_members (group_id, phone, name) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING',
+      [req.params.id, memberPhone, memberName]
+    );
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/groups/:id/members/:phone', async (req, res) => {
+  try {
+    const { userPhone } = req.body;
+    const g = await pool.query('SELECT * FROM group_chats WHERE id=$1', [req.params.id]);
+    if (g.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+
+    const isCreator = g.rows[0].creator_phone === userPhone;
+    const isSelf = userPhone === req.params.phone;
+    if (!isCreator && !isSelf) return res.status(403).json({ error: 'Нет прав' });
+    if (req.params.phone === g.rows[0].creator_phone) {
+      return res.status(400).json({ error: 'Создатель не может выйти. Удали группу.' });
+    }
+
+    await pool.query('DELETE FROM group_members WHERE group_id=$1 AND phone=$2',
+      [req.params.id, req.params.phone]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/groups/:id', async (req, res) => {
+  try {
+    const { userPhone } = req.body;
+    const g = await pool.query('SELECT * FROM group_chats WHERE id=$1', [req.params.id]);
+    if (g.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    if (g.rows[0].creator_phone !== userPhone) return res.status(403).json({ error: 'Только создатель' });
+
+    await pool.query('DELETE FROM group_messages WHERE group_id=$1', [req.params.id]);
+    await pool.query('DELETE FROM group_members WHERE group_id=$1', [req.params.id]);
+    await pool.query('DELETE FROM group_chats WHERE id=$1', [req.params.id]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/group_messages/:groupId', async (req, res) => {
+  try {
+    const r = await pool.query(
+      'SELECT * FROM group_messages WHERE group_id=$1 ORDER BY id ASC LIMIT 200',
+      [req.params.groupId]
+    );
+    res.json(r.rows.map(m => ({
+      id: m.id, groupId: m.group_id,
+      from: m.from_phone, fromName: m.from_name, fromAvatar: m.from_avatar,
+      text: m.text, replyTo: m.reply_to, time: m.time, date: m.date,
+    })));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/group_messages', async (req, res) => {
+  try {
+    const m = req.body;
+    await pool.query(
+      `INSERT INTO group_messages (id, group_id, from_phone, from_name, from_avatar, text, reply_to, time, date)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (id) DO NOTHING`,
+      [m.id, m.groupId, m.from, m.fromName, m.fromAvatar || null, m.text || '', m.replyTo || null, m.time, m.date || null]
+    );
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ═══════════════════════════════════════════════════════
+// НАСТРОЙКИ ЧАТА
+// ═══════════════════════════════════════════════════════
+app.get('/api/chat_settings/:phone', async (req, res) => {
+  try {
+    const r = await pool.query('SELECT * FROM chat_settings WHERE phone=$1', [req.params.phone]);
+    res.json(r.rows.map(x => ({
+      chatType: x.chat_type, chatId: x.chat_id,
+      clearedAt: x.cleared_at, deleted: x.deleted,
+      blocked: x.blocked, lastReadId: x.last_read_id,
+    })));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/chat_settings', async (req, res) => {
+  try {
+    const { phone, chatType, chatId, clearedAt, deleted, blocked, lastReadId } = req.body;
+    if (!phone || !chatType || !chatId) return res.status(400).json({ error: 'Bad params' });
+
+    await pool.query(
+      `INSERT INTO chat_settings (phone, chat_type, chat_id, cleared_at, deleted, blocked, last_read_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)
+       ON CONFLICT (phone, chat_type, chat_id) DO UPDATE SET
+         cleared_at = COALESCE($4, chat_settings.cleared_at),
+         deleted = COALESCE($5, chat_settings.deleted),
+         blocked = COALESCE($6, chat_settings.blocked),
+         last_read_id = COALESCE($7, chat_settings.last_read_id)`,
+      [phone, chatType, chatId, clearedAt || null, deleted, blocked, lastReadId || null]
+    );
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Полная очистка личного чата (для обоих участников)
+app.post('/api/private/:chatId/clear', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM private_messages WHERE chat_id=$1', [req.params.chatId]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Полная очистка группового чата (создатель)
+app.post('/api/group_messages/:groupId/clear', async (req, res) => {
+  try {
+    const { userPhone } = req.body;
+    const g = await pool.query('SELECT * FROM group_chats WHERE id=$1', [req.params.groupId]);
+    if (g.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    if (g.rows[0].creator_phone !== userPhone) return res.status(403).json({ error: 'Только создатель' });
+
+    await pool.query('DELETE FROM group_messages WHERE group_id=$1', [req.params.groupId]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Полная очистка общего чата (ПР)
+app.post('/api/messages/clear_all', async (req, res) => {
+  try {
+    const { userPhone } = req.body;
+    const u = await pool.query('SELECT status FROM users WHERE phone=$1', [userPhone]);
+    if (u.rows.length === 0 || u.rows[0].status !== 'ПР') {
+      return res.status(403).json({ error: 'Только ПР' });
+    }
+    await pool.query('DELETE FROM messages');
+    res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
