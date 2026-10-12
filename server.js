@@ -2463,6 +2463,378 @@ setInterval(tickHolidays, 60 * 60 * 1000);
 setTimeout(tickHolidays, 10 * 1000);
 
 // ═══════════════════════════════════════════════════════
+// АВТО-НАГРАДЫ (5.7, 5.11, 5.12)
+// ═══════════════════════════════════════════════════════
+const tickAutoRewards = async () => {
+  try {
+    // ═══ 5.7 Богач: > 300 ₮ → +2000 ауры (один раз) ═══
+    const richRes = await pool.query(`
+      SELECT phone, first_name, last_name, tonki, aura
+      FROM users
+      WHERE status <> 'ПР'
+        AND tonki > 300
+        AND last_rich_reward = false
+    `);
+    for (const u of richRes.rows) {
+      await pool.query(
+        'UPDATE users SET aura = COALESCE(aura, 0) + 2000, last_rich_reward = true WHERE phone = $1',
+        [u.phone]
+      );
+      await pool.query(
+        `INSERT INTO aura_history (id, phone, delta, reason, date)
+         VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO NOTHING`,
+        [
+          Date.now() + Math.floor(Math.random() * 100000),
+          u.phone,
+          2000,
+          '💰 Богач (п. 5.7) — набрал >300₮',
+          new Date().toLocaleString('ru-RU')
+        ]
+      );
+      await pool.query(
+        `INSERT INTO messages (id, from_phone, from_name, from_avatar, from_status, text, time, date)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [
+          Date.now() + Math.floor(Math.random() * 100000),
+          'system',
+          '🎁 Награды',
+          null,
+          'БОТ',
+          `${u.first_name} ${u.last_name} получил награду «💰 Богач» (+2000 ауры) за >300₮`,
+          new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }),
+          new Date().toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })
+        ]
+      );
+    }
+
+    // ═══ 5.11 Топ 1: 2 дня подряд топ по ауре → +10₮ +500 ауры ═══
+    const today = new Date().toISOString().slice(0, 10);
+    const top1Res = await pool.query(`
+      SELECT phone, first_name, last_name, aura, top1_streak, last_top1_check, last_rich_reward
+      FROM users
+      WHERE status <> 'ПР'
+      ORDER BY aura DESC
+      LIMIT 1
+    `);
+    if (top1Res.rows.length > 0) {
+      const top1 = top1Res.rows[0];
+      if (top1.last_top1_check !== today) {
+        const newStreak = (top1.top1_streak || 0) + 1;
+        await pool.query(
+          'UPDATE users SET top1_streak = $1, last_top1_check = $2 WHERE phone = $3',
+          [newStreak, today, top1.phone]
+        );
+
+        if (newStreak >= 2) {
+          // Обнуляем streak у других (они больше не топ-1)
+          await pool.query(
+            'UPDATE users SET top1_streak = 0 WHERE phone <> $1 AND status <> $2',
+            [top1.phone, 'ПР']
+          );
+
+          // Выдаём награду раз в день, если топ-1 держится 2+ дня
+          const alreadyRewardedToday = await pool.query(
+            `SELECT id FROM aura_history
+             WHERE phone = $1 AND reason LIKE '%Топ 1%'
+             AND date >= $2`,
+            [top1.phone, new Date().toISOString().slice(0, 10)]
+          );
+          if (alreadyRewardedToday.rows.length === 0) {
+            await pool.query(
+              'UPDATE users SET tonki = tonki + 10, aura = COALESCE(aura, 0) + 500 WHERE phone = $1',
+              [top1.phone]
+            );
+            await pool.query(
+              `INSERT INTO aura_history (id, phone, delta, reason, date)
+               VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO NOTHING`,
+              [
+                Date.now() + Math.floor(Math.random() * 100000),
+                top1.phone,
+                500,
+                '🏆 Топ 1 (п. 5.11) — 2+ дня на первом месте',
+                new Date().toLocaleString('ru-RU')
+              ]
+            );
+            await pool.query(
+              `INSERT INTO messages (id, from_phone, from_name, from_avatar, from_status, text, time, date)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+              [
+                Date.now() + Math.floor(Math.random() * 100000),
+                'system',
+                '🎁 Награды',
+                null,
+                'БОТ',
+                `🏆 ${top1.first_name} ${top1.last_name} — Топ 1 уже ${newStreak} дн. (+10₮, +500 ауры)`,
+                new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }),
+                new Date().toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })
+              ]
+            );
+          }
+        }
+      }
+    }
+
+    // ═══ 5.12 Главный пенсионер: 3 месяца на пенсии → +20₮ +1000 ауры ═══
+    const pensionRes = await pool.query(`
+      SELECT phone, first_name, last_name, pension_started_at
+      FROM users
+      WHERE has_pension = true
+        AND last_pensioner_reward = false
+        AND pension_started_at IS NOT NULL
+        AND pension_started_at < NOW() - INTERVAL '90 days'
+    `);
+    for (const u of pensionRes.rows) {
+      await pool.query(
+        'UPDATE users SET tonki = tonki + 20, aura = COALESCE(aura, 0) + 1000, last_pensioner_reward = true WHERE phone = $1',
+        [u.phone]
+      );
+      await pool.query(
+        `INSERT INTO aura_history (id, phone, delta, reason, date)
+         VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO NOTHING`,
+        [
+          Date.now() + Math.floor(Math.random() * 100000),
+          u.phone,
+          1000,
+          '👴 Главный пенсионер (п. 5.12) — 3 месяца на пенсии',
+          new Date().toLocaleString('ru-RU')
+        ]
+      );
+      await pool.query(
+        `INSERT INTO messages (id, from_phone, from_name, from_avatar, from_status, text, time, date)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [
+          Date.now() + Math.floor(Math.random() * 100000),
+          'system',
+          '🎁 Награды',
+          null,
+          'БОТ',
+          `👴 ${u.first_name} ${u.last_name} — Главный пенсионер! (+20₮, +1000 ауры)`,
+          new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }),
+          new Date().toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })
+        ]
+      );
+    }
+
+    // ═══ Записываем pension_started_at при первой выдаче пенсии ═══
+    await pool.query(`
+      UPDATE users
+      SET pension_started_at = NOW()
+      WHERE has_pension = true
+        AND pension_started_at IS NULL
+    `);
+  } catch (err) {
+    console.error('tickAutoRewards:', err.message);
+  }
+};
+
+// ═══════════════════════════════════════════════════════
+// АВТО-ШТРАФЫ (по крону)
+// ═══════════════════════════════════════════════════════
+const tickAutoFines = async () => {
+  try {
+    const now = Date.now();
+    const DAY = 24 * 60 * 60 * 1000;
+
+    const usersRes = await pool.query('SELECT * FROM users WHERE status <> $1', ['ПР']);
+
+    for (const u of usersRes.rows) {
+      if (u.is_banned) continue;
+
+      const FINE_COOLDOWN = 6 * 60 * 60 * 1000; // 6 часов между автоштрафами одного типа
+
+      // ═══ 1. НЕАКТИВНОСТЬ (п. 3.3) ═══
+      const lastSeen = u.last_seen_at ? new Date(u.last_seen_at).getTime() : 0;
+      const daysSinceSeen = lastSeen ? (now - lastSeen) / DAY : 999;
+      const lastInactive = u.last_auto_inactive_at ? new Date(u.last_auto_inactive_at).getTime() : 0;
+      if (daysSinceSeen >= 14 && (now - lastInactive) > FINE_COOLDOWN) {
+        await applyAutoFine(u, {
+          reason: '💤 Неактивность (п. 3.3)',
+          fineAmount: 0,
+          auraDelta: -400,
+          stampDays: 2,
+          stampReason: '3.3 — Неактивность (2 нед без захода)',
+          cooldownField: 'last_auto_inactive_at',
+        });
+      }
+
+      // ═══ 2. НАЛОГИ (п. 3.11) ═══
+      const lastTax = u.last_tax_paid_at ? new Date(u.last_tax_paid_at).getTime() : 0;
+      const daysSinceTax = lastTax ? (now - lastTax) / DAY : 999;
+      const lastTaxFine = u.last_auto_tax_at ? new Date(u.last_auto_tax_at).getTime() : 0;
+      if (daysSinceTax >= 4 && (now - lastTaxFine) > FINE_COOLDOWN) {
+        await applyAutoFine(u, {
+          reason: '📋 Налоги не оплачены (п. 3.11)',
+          fineAmount: 5,
+          auraDelta: -150,
+          cooldownField: 'last_auto_tax_at',
+        });
+      }
+
+      // ═══ 3. БЕЗДЕЛЬНИЧЕСТВО (п. 3.6) ═══
+      const profsRes = await pool.query(
+        'SELECT * FROM professions WHERE phone = $1',
+        [u.phone]
+      );
+      const lastIdle = u.last_auto_idle_at ? new Date(u.last_auto_idle_at).getTime() : 0;
+      for (const p of profsRes.rows) {
+        const lastPaid = p.last_paid_at ? new Date(p.last_paid_at).getTime() : 0;
+        const daysSincePay = lastPaid ? (now - lastPaid) / DAY : 999;
+        if (daysSincePay >= 3 && (now - lastIdle) > FINE_COOLDOWN) {
+          await applyAutoFine(u, {
+            reason: `🚫 Бездельничество (п. 3.6) — ${p.profession}`,
+            fineAmount: 10,
+            auraDelta: -100,
+            cooldownField: 'last_auto_idle_at',
+          });
+          break;
+        }
+      }
+
+      // ═══ 4. КРЕДИТ ПРОСРОЧЕН (п. 3.10) ═══
+      const creditsRes = await pool.query(
+        `SELECT * FROM credits WHERE user_phone = $1 AND status = 'active'`,
+        [u.phone]
+      );
+      const lastCredit = u.last_auto_credit_at ? new Date(u.last_auto_credit_at).getTime() : 0;
+      for (const c of creditsRes.rows) {
+        if (c.due_date && new Date(c.due_date).getTime() < now && (now - lastCredit) > FINE_COOLDOWN) {
+          const remaining = c.total_due - (c.paid || 0);
+          await applyAutoFine(u, {
+            reason: `💳 Кредит просрочен (п. 3.10) — ${remaining}₮`,
+            fineAmount: 0,
+            auraDelta: -300,
+            stampDays: 30,
+            stampReason: '3.10 — Кредит не возвращён',
+            cooldownField: 'last_auto_credit_at',
+          });
+          break;
+        }
+      }
+
+      // ═══ 5. ДОЛЖНИК (п. 3.17) — баланс < -200 ₮ ═══
+      const lastDebtor = u.last_auto_debtor_at ? new Date(u.last_auto_debtor_at).getTime() : 0;
+      if (u.tonki < -200 && (now - lastDebtor) > FINE_COOLDOWN) {
+        // Простительное выселение + 50₮
+        await pool.query(
+          `UPDATE users SET
+            is_banned = true,
+            ban_type = 'forgiving',
+            ban_reason = '3.17 — Должник (баланс -200₮ и ниже)',
+            tonki = 50,
+            last_auto_debtor_at = NOW()
+          WHERE phone = $1`,
+          [u.phone]
+        );
+        await pool.query(
+          `INSERT INTO messages (id, from_phone, from_name, from_avatar, from_status, text, time, date)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          [
+            Date.now() + Math.floor(Math.random() * 100000),
+            'system',
+            '⚠️ Автоштраф',
+            null,
+            'БОТ',
+            `🕊️ ${u.first_name} ${u.last_name} выселен по п. 3.17 (баланс -200₮) + выдан 50₮`,
+            new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }),
+            new Date().toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })
+          ]
+        );
+      }
+    }
+  } catch (err) {
+    console.error('tickAutoFines:', err.message);
+  }
+};
+
+// Вспомогательная функция — применяет автоштраф
+const applyAutoFine = async (user, opts) => {
+  try {
+    // Штраф
+    if (opts.fineAmount > 0) {
+      await pool.query(
+        `INSERT INTO fines (id, phone, reason, amount, from_phone, from_name, date, paid)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, false)`,
+        [
+          Date.now() + Math.floor(Math.random() * 1000),
+          user.phone,
+          opts.reason,
+          opts.fineAmount,
+          'auto',
+          '🤖 Авто',
+          new Date().toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+        ]
+      );
+    }
+
+    // Аура
+    if (opts.auraDelta && opts.auraDelta !== 0) {
+      const newAura = (user.aura || 0) + opts.auraDelta;
+      let newStatus = user.status;
+      if (user.status === 'ПМ' && newAura < 9800) {
+        newStatus = 'ЖИ';
+      }
+      await pool.query(
+        'UPDATE users SET aura = $1, status = $2 WHERE phone = $3',
+        [newAura, newStatus, user.phone]
+      );
+      await pool.query(
+        `INSERT INTO aura_history (id, phone, delta, reason, date)
+         VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO NOTHING`,
+        [
+          Date.now() + Math.floor(Math.random() * 1000),
+          user.phone,
+          opts.auraDelta,
+          `⚠️ Автоштраф: ${opts.reason}`,
+          new Date().toLocaleString('ru-RU')
+        ]
+      );
+    }
+
+    // Штамм
+    if (opts.stampDays) {
+      const until = new Date(Date.now() + opts.stampDays * 24 * 60 * 60 * 1000).toISOString();
+      await pool.query(
+        `UPDATE users SET is_banned = false, ban_reason = $1, ban_type = 'stamp', stamp_until = $2 WHERE phone = $3`,
+        [opts.stampReason, until, user.phone]
+      );
+    }
+
+    // Отметка о применении
+    if (opts.cooldownField) {
+      await pool.query(
+        `UPDATE users SET ${opts.cooldownField} = NOW() WHERE phone = $1`,
+        [user.phone]
+      );
+    }
+
+    // Сообщение в чат
+    await pool.query(
+      `INSERT INTO messages (id, from_phone, from_name, from_avatar, from_status, text, time, date)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [
+        Date.now() + Math.floor(Math.random() * 100000),
+        'system',
+        '⚠️ Автоштраф',
+        null,
+        'БОТ',
+        `${user.first_name} ${user.last_name}: ${opts.reason}${opts.fineAmount > 0 ? ` · ${opts.fineAmount}₮` : ''}${opts.auraDelta ? ` · ${opts.auraDelta} ауры` : ''}${opts.stampDays ? ` · штамм ${opts.stampDays} дн.` : ''}`,
+        new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }),
+        new Date().toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })
+      ]
+    );
+  } catch (err) {
+    console.error('applyAutoFine error:', err.message, 'for', user.phone);
+  }
+};
+
+// ═══ Запуск кронов ═══
+setInterval(tickAutoRewards, 60 * 60 * 1000);       // раз в час
+setTimeout(tickAutoRewards, 30 * 1000);             // при запуске через 30 сек
+
+setInterval(tickAutoFines, 6 * 60 * 60 * 1000);     // раз в 6 часов
+setTimeout(tickAutoFines, 60 * 1000);               // при запуске через 1 мин
+
+// ═══════════════════════════════════════════════════════
 // ЗАПУСК
 // ═══════════════════════════════════════════════════════
 app.listen(PORT, () => {
