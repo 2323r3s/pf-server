@@ -476,6 +476,16 @@ const initDB = async () => {
       )
     `);
 
+        // ═══ СЧЁТЧИК ПОБЕД ПАРТИЙ (п. 5.9) ═══
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS party_wins (
+        party_id BIGINT PRIMARY KEY,
+        wins INTEGER DEFAULT 0,
+        last_win_at TIMESTAMP,
+        reward_granted BOOLEAN DEFAULT false
+      )
+    `);
+
     // Настройки чата — для каждого ЖИ свои (clear / delete / block)
     await pool.query(`
       CREATE TABLE IF NOT EXISTS chat_settings (
@@ -510,6 +520,8 @@ const initDB = async () => {
     await pool.query(`ALTER TABLE group_messages ADD COLUMN IF NOT EXISTS voice_duration INTEGER`);
     await pool.query(`ALTER TABLE party_messages ADD COLUMN IF NOT EXISTS voice TEXT`);
     await pool.query(`ALTER TABLE party_messages ADD COLUMN IF NOT EXISTS voice_duration INTEGER`);
+
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS farm_aura_applied BOOLEAN DEFAULT false`);
 
     console.log('✅ Таблицы готовы');
   } catch (err) {
@@ -1789,15 +1801,21 @@ app.post('/api/elections/finish', async (req, res) => {
     await pool.query('UPDATE users SET status=$1 WHERE status=$2 AND phone<>$3', ['ЖИ', 'ПВ', winnerPhone]);
     await pool.query('UPDATE users SET tonki = tonki + 100 WHERE phone=$1', [winnerPhone]);
 
+    // ═══ Победная партия (п. 5.6) + счётчик (п. 5.9) ═══
     let partyMembers = [];
+    let partyId = null;
     try {
       const cRes = await pool.query(
-        'SELECT pm.phone, pm.name FROM party_members pm JOIN party_candidates pc ON pc.party_id = pm.party_id WHERE pc.phone=$1',
+        'SELECT pm.phone, pm.name, pm.party_id FROM party_members pm JOIN party_candidates pc ON pc.party_id = pm.party_id WHERE pc.phone=$1',
         [winnerPhone]
       );
       partyMembers = cRes.rows;
+      if (cRes.rows.length > 0) {
+        partyId = cRes.rows[0].party_id;
+      }
     } catch (e) { console.error('party bonus:', e.message); }
 
+    // +1000 ауры за победную партию (п. 5.6)
     for (const m of partyMembers) {
       await pool.query('UPDATE users SET aura = COALESCE(aura, 0) + 1000 WHERE phone=$1', [m.phone]);
       await pool.query(
@@ -1813,8 +1831,81 @@ app.post('/api/elections/finish', async (req, res) => {
       );
     }
 
+    // ═══ Счётчик побед партии (п. 5.9) ═══
+    let finalWins = 0;
+    let rewardGranted = false;
+
+    if (partyId) {
+      const winsRes = await pool.query('SELECT * FROM party_wins WHERE party_id=$1', [partyId]);
+      let currentWins = 0;
+      let alreadyRewarded = false;
+      if (winsRes.rows.length > 0) {
+        currentWins = winsRes.rows[0].wins || 0;
+        alreadyRewarded = winsRes.rows[0].reward_granted || false;
+      }
+      finalWins = currentWins + 1;
+
+      if (winsRes.rows.length === 0) {
+        await pool.query(
+          'INSERT INTO party_wins (party_id, wins, last_win_at) VALUES ($1, $2, NOW())',
+          [partyId, finalWins]
+        );
+      } else {
+        await pool.query(
+          'UPDATE party_wins SET wins=$1, last_win_at=NOW() WHERE party_id=$2',
+          [finalWins, partyId]
+        );
+      }
+
+      // ═══ 4 победы → +3000 ауры всем участникам (п. 5.9) ═══
+      if (finalWins >= 4 && !alreadyRewarded) {
+        rewardGranted = true;
+        for (const m of partyMembers) {
+          await pool.query('UPDATE users SET aura = COALESCE(aura, 0) + 3000 WHERE phone=$1', [m.phone]);
+          await pool.query(
+            `INSERT INTO aura_history (id, phone, delta, reason, date)
+             VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO NOTHING`,
+            [
+              Date.now() + Math.floor(Math.random() * 100000),
+              m.phone,
+              3000,
+              '🏆 Лучшая партия (п. 5.9) — 4 победы на выборах',
+              new Date().toLocaleString('ru-RU')
+            ]
+          );
+        }
+        await pool.query(
+          'UPDATE party_wins SET reward_granted=true WHERE party_id=$1',
+          [partyId]
+        );
+
+        // Сообщение в общий чат
+        await pool.query(
+          `INSERT INTO messages (id, from_phone, from_name, from_avatar, from_status, text, time, date)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          [
+            Date.now() + Math.floor(Math.random() * 100000),
+            'system',
+            '🏆 Лучшая партия',
+            null,
+            'БОТ',
+            `🎉 Партия победила 4 раза! Все участники получают +3000 ауры (п. 5.9)`,
+            new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }),
+            new Date().toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })
+          ]
+        );
+      }
+    }
+
     await pool.query('UPDATE elections SET finished=true, winner_phone=$1, winner_name=$2 WHERE id=1', [winnerPhone, winnerName]);
-    res.json({ ok: true, winnerPhone, winnerName, partyBonus: partyMembers.length });
+    res.json({
+      ok: true,
+      winnerPhone,
+      winnerName,
+      partyBonus: partyMembers.length,
+      partyWins: finalWins,
+      bestPartyRewarded: rewardGranted,
+    });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -1826,6 +1917,8 @@ app.delete('/api/elections', async (req, res) => {
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
+
+
 
 // ═══════════════════════════════════════════════════════
 // ЗАРПЛАТЫ
@@ -2252,6 +2345,39 @@ app.post('/api/appeals/:id/resolve', async (req, res) => {
       await pool.query('DELETE FROM fines WHERE id=$1', [appeal.fine_id]);
     }
     res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ═══════════════════════════════════════════════════════
+// 5.10 ПОДАРКИ — отдельный эндпоинт для трекинга
+// ═══════════════════════════════════════════════════════
+app.post('/api/users/gift_reward', async (req, res) => {
+  try {
+    const { phone, giverName } = req.body;
+    if (!phone) return res.status(400).json({ error: 'Bad params' });
+
+    const uRes = await pool.query('SELECT * FROM users WHERE phone=$1', [phone]);
+    if (uRes.rows.length === 0) return res.status(404).json({ error: 'User not found' });
+    const u = uRes.rows[0];
+
+    if (u.status === 'ПР') return res.status(400).json({ error: 'ПР не получает ауру' });
+
+    const newAura = (u.aura || 0) + 1000;
+    await pool.query('UPDATE users SET aura=$1 WHERE phone=$2', [newAura, phone]);
+
+    await pool.query(
+      `INSERT INTO aura_history (id, phone, delta, reason, date)
+       VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO NOTHING`,
+      [
+        Date.now() + Math.floor(Math.random() * 1000),
+        phone,
+        1000,
+        `🎁 Подарки (п. 5.10) — хороший подарок ПР (${giverName || 'ПР'})`,
+        new Date().toLocaleString('ru-RU')
+      ]
+    );
+
+    res.json({ ok: true, newAura });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -3261,6 +3387,58 @@ const applyAutoFine = async (user, opts) => {
 // ═══ Запуск кронов ═══
 setInterval(tickAutoRewards, 60 * 60 * 1000);       // раз в час
 setTimeout(tickAutoRewards, 30 * 1000);             // при запуске через 30 сек
+
+// ═══════════════════════════════════════════════════════
+// АВТО-НАГРАДА 5.13 — ФАРМ АУРЫ
+// ═══════════════════════════════════════════════════════
+const tickFarmAura = async () => {
+  try {
+    // У кого аура >= 12000 и флаг не выставлен → выдаём «скидку»
+    const res = await pool.query(`
+      SELECT phone, first_name, last_name, aura
+      FROM users
+      WHERE status <> 'ПР'
+        AND aura >= 12000
+        AND farm_aura_applied = false
+    `);
+
+    for (const u of res.rows) {
+      await pool.query(
+        'UPDATE users SET farm_aura_applied = true WHERE phone = $1',
+        [u.phone]
+      );
+      await pool.query(
+        `INSERT INTO messages (id, from_phone, from_name, from_avatar, from_status, text, time, date)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [
+          Date.now() + Math.floor(Math.random() * 100000),
+          'system',
+          '💎 Фарм ауры',
+          null,
+          'БОТ',
+          `💎 ${u.first_name} ${u.last_name} достиг ауры 12000+! Скидка 1₮ на всё (кроме налогов) — п. 5.13`,
+          new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }),
+          new Date().toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })
+        ]
+      );
+    }
+
+    // Если аура упала ниже 12000 — снимаем скидку
+    await pool.query(`
+      UPDATE users
+      SET farm_aura_applied = false
+      WHERE status <> 'ПР'
+        AND aura < 12000
+        AND farm_aura_applied = true
+    `);
+  } catch (err) {
+    console.error('tickFarmAura:', err.message);
+  }
+};
+
+// Запуск раз в час
+setInterval(tickFarmAura, 60 * 60 * 1000);
+setTimeout(tickFarmAura, 20 * 1000);
 
 setInterval(tickAutoFines, 6 * 60 * 60 * 1000);     // раз в 6 часов
 setTimeout(tickAutoFines, 60 * 1000);               // при запуске через 1 мин
