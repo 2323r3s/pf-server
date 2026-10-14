@@ -3571,6 +3571,14 @@ const tickAutoRewards = async () => {
   } catch (err) { console.error('tickAutoRewards:', err.message); }
 };
 
+app.get('/api/debug/firebase', (req, res) => {
+  res.json({
+    hasEnv: !!process.env.FIREBASE_SERVICE_ACCOUNT,
+    envLength: process.env.FIREBASE_SERVICE_ACCOUNT?.length || 0,
+    adminApps: admin.apps.length,
+  });
+});
+
 // ═══════════════════════════════════════════════════════
 // АВТО-ШТРАФЫ
 // ═══════════════════════════════════════════════════════
