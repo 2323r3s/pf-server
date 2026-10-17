@@ -1439,6 +1439,70 @@ app.post('/api/bank_pf', async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════
+// СБРОС ПОДВАЛА (ТОЛЬКО ДЛЯ ПР)
+// ═══════════════════════════════════════════════════════
+app.post('/api/admin/reset', async (req, res) => {
+  try {
+    const { adminPhone } = req.body;
+    if (!adminPhone) return res.status(400).json({ error: 'Bad params' });
+
+    // Проверяем, что это реально ПР
+    const uRes = await pool.query('SELECT status FROM users WHERE phone=$1', [adminPhone]);
+    if (uRes.rows.length === 0 || uRes.rows[0].status !== 'ПР') {
+      return res.status(403).json({ error: 'Только ПР может сбросить подвал' });
+    }
+
+    // Очищаем ВСЁ, кроме самого пользователя-ПР
+    await pool.query('DELETE FROM users WHERE phone <> $1', [adminPhone]);
+    await pool.query('DELETE FROM news');
+    await pool.query('DELETE FROM bank');
+    await pool.query('DELETE FROM interest_history');
+    await pool.query('DELETE FROM fines');
+    await pool.query('DELETE FROM friends');
+    await pool.query('DELETE FROM messages');
+    await pool.query('DELETE FROM private_messages');
+    await pool.query('DELETE FROM group_messages');
+    await pool.query('DELETE FROM party_messages');
+    await pool.query('DELETE FROM appeals');
+    await pool.query('DELETE FROM doc_requests');
+    await pool.query('DELETE FROM aura_history');
+    await pool.query('DELETE FROM salary_paid');
+    await pool.query('DELETE FROM elections');
+    await pool.query('DELETE FROM election_candidates');
+    await pool.query('DELETE FROM election_votes');
+    await pool.query('DELETE FROM casino_history');
+    await pool.query('DELETE FROM casino_daily');
+    await pool.query('DELETE FROM casino_permission');
+    await pool.query('DELETE FROM credit_requests');
+    await pool.query('DELETE FROM credits');
+    await pool.query('DELETE FROM professions');
+    await pool.query('DELETE FROM profession_requests');
+    await pool.query('DELETE FROM profession_salary_paid');
+    await pool.query('DELETE FROM parties');
+    await pool.query('DELETE FROM party_members');
+    await pool.query('DELETE FROM party_requests');
+    await pool.query('DELETE FROM party_candidates');
+    await pool.query('DELETE FROM party_wins');
+    await pool.query('DELETE FROM password_resets');
+    await pool.query('DELETE FROM debts');
+    await pool.query('DELETE FROM achievements');
+    await pool.query('DELETE FROM message_reactions');
+    await pool.query('DELETE FROM group_chats');
+    await pool.query('DELETE FROM group_members');
+    await pool.query('DELETE FROM chat_settings');
+    await pool.query('DELETE FROM notifications');
+    await pool.query('DELETE FROM fcm_tokens');
+
+    // Сбрасываем ПРу тонки и ауру на дефолт, чтобы начать жизнь с чистого листа
+    await pool.query('UPDATE users SET tonki=10000, aura=28000 WHERE phone=$1', [adminPhone]);
+
+    res.json({ ok: true, message: 'Подвал стерт. Остался только ты.' });
+  } catch (err) { 
+    res.status(500).json({ error: err.message }); 
+  }
+});
+
+// ═══════════════════════════════════════════════════════
 // КАЗИНО
 // ═══════════════════════════════════════════════════════
 app.post('/api/casino/spin', async (req, res) => {
