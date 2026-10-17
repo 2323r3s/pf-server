@@ -591,10 +591,18 @@ app.get('/', (req, res) => {
 // ═══════════════════════════════════════════════════════
 const sendPushNotification = async (phone, title, body, target, targetId) => {
   try {
-    if (!admin.apps.length) return;
+    // Явно проверяем, что Firebase загружен
+    if (!admin || !admin.messaging) {
+      console.log('❌ [PUSH] Firebase Admin не инициализирован');
+      return;
+    }
 
     const tokenRes = await pool.query('SELECT token FROM fcm_tokens WHERE phone=$1', [phone]);
-    if (tokenRes.rows.length === 0) return;
+    if (tokenRes.rows.length === 0) {
+      console.log(`⚠️ [PUSH] Нет FCM-токена для ${phone}`);
+      return;
+    }
+    
     const token = tokenRes.rows[0].token;
 
     const message = {
@@ -613,13 +621,16 @@ const sendPushNotification = async (phone, title, body, target, targetId) => {
       },
     };
 
-    await admin.messaging().send(message);
+    console.log(`📤 [PUSH] Отправка на ${phone}: ${title}`);
+    const response = await admin.messaging().send(message);
+    console.log(`✅ [PUSH] Успешно отправлено! ID: ${response}`);
+    
   } catch (err) {
+    console.error(`❌ [PUSH] Ошибка отправки:`, err.code, err.message);
     if (err.code === 'messaging/registration-token-not-registered' ||
         err.code === 'messaging/invalid-registration-token') {
       await pool.query('DELETE FROM fcm_tokens WHERE phone=$1', [phone]);
     }
-    console.error('sendPushNotification:', err.message);
   }
 };
 
@@ -634,9 +645,13 @@ const createNotification = async (phone, type, title, text, target, targetId) =>
        VALUES ($1, $2, $3, $4, $5, $6, $7)`,
       [Date.now() + Math.floor(Math.random() * 1000), phone, type, title, text || null, target || null, targetId || null]
     );
-    // ═══ ОТПРАВЛЯЕМ PUSH ═══
+    
+    // ═══ ОТПРАВЛЯЕМ PUSH (с задержкой, чтобы Vercel не убил процесс) ═══
     await sendPushNotification(phone, title, text || '', target, targetId);
-  } catch (err) { console.error('createNotification:', err.message); }
+    
+  } catch (err) { 
+    console.error('createNotification:', err.message); 
+  }
 };
 
 // ═══════════════════════════════════════════════════════
@@ -3598,7 +3613,6 @@ app.get('/api/debug/firebase', (req, res) => {
       clientEmail: parsed ? parsed.client_email : null,
       privateKeyStart: parsed && parsed.private_key ? parsed.private_key.slice(0, 30) : null,
       hasDatabaseUrl: !!process.env.DATABASE_URL,
-      adminApps: (typeof admin !== 'undefined' && admin.apps) ? admin.apps.length : 'admin not defined',
     });
   } catch (e) {
     res.status(500).json({ error: e.message, stack: e.stack });
