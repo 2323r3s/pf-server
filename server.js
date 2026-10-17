@@ -27,6 +27,11 @@ try {
     : null;
 
   if (serviceAccount) {
+    // Принудительно исправляем переносы строк в приватном ключе
+    if (serviceAccount.private_key) {
+      serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
+    }
+
     admin.initializeApp({
       credential: admin.credential.cert(serviceAccount),
     });
