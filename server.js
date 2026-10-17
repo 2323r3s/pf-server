@@ -3572,11 +3572,32 @@ const tickAutoRewards = async () => {
 };
 
 app.get('/api/debug/firebase', (req, res) => {
-  res.json({
-    hasEnv: !!process.env.FIREBASE_SERVICE_ACCOUNT,
-    envLength: process.env.FIREBASE_SERVICE_ACCOUNT?.length || 0,
-    adminApps: admin.apps.length,
-  });
+  try {
+    const env = process.env.FIREBASE_SERVICE_ACCOUNT;
+    let parsed = null;
+    let parseError = null;
+    if (env) {
+      try {
+        parsed = JSON.parse(env);
+      } catch (e) {
+        parseError = e.message;
+      }
+    }
+    res.json({
+      hasEnv: !!env,
+      envLength: env ? env.length : 0,
+      envStart: env ? env.slice(0, 60) : null,
+      parseOk: !!parsed,
+      parseError,
+      projectId: parsed ? parsed.project_id : null,
+      clientEmail: parsed ? parsed.client_email : null,
+      privateKeyStart: parsed && parsed.private_key ? parsed.private_key.slice(0, 30) : null,
+      hasDatabaseUrl: !!process.env.DATABASE_URL,
+      adminApps: (typeof admin !== 'undefined' && admin.apps) ? admin.apps.length : 'admin not defined',
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message, stack: e.stack });
+  }
 });
 
 // ═══════════════════════════════════════════════════════
