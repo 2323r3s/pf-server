@@ -1439,6 +1439,65 @@ app.post('/api/bank_pf', async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════
+// ИГРА: ЭВОЛЮЦИЯ ПОДВАЛА (IDLE)
+// ═══════════════════════════════════════════════════════
+
+// Получить состояние игры
+app.get('/api/games/idle/:phone', async (req, res) => {
+  try {
+    const r = await pool.query('SELECT game_rubles, game_generators, game_meta_aura FROM users WHERE phone=$1', [req.params.phone]);
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    const u = r.rows[0];
+    res.json({
+      rubles: parseInt(u.game_rubles) || 0,
+      generators: u.game_generators || [],
+      metaAura: parseInt(u.game_meta_aura) || 0,
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Сохранить прогресс (клик / покупка)
+app.post('/api/games/idle/save', async (req, res) => {
+  try {
+    const { phone, rubles, generators } = req.body;
+    if (!phone) return res.status(400).json({ error: 'Bad params' });
+
+    // Защита от читов (проверяем, что генераторы - это массив)
+    const safeGenerators = Array.isArray(generators) ? generators : [];
+
+    await pool.query(
+      'UPDATE users SET game_rubles=$1, game_generators=$2 WHERE phone=$3',
+      [rubles, JSON.stringify(safeGenerators), phone]
+    );
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Престиж (Сброс Эры)
+app.post('/api/games/idle/prestige', async (req, res) => {
+  try {
+    const { phone } = req.body;
+    const r = await pool.query('SELECT game_rubles, game_meta_aura FROM users WHERE phone=$1', [phone]);
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    
+    const rubles = parseInt(r.rows[0].game_rubles) || 0;
+    // Даем 1 мета-ауру за каждые 1000 рублей
+    const earnedMeta = Math.floor(Math.sqrt(rubles / 1000)); 
+
+    if (earnedMeta <= 0) return res.status(400).json({ error: 'Нужно больше рублей для сброса' });
+
+    const newMeta = (parseInt(r.rows[0].game_meta_aura) || 0) + earnedMeta;
+
+    await pool.query(
+      'UPDATE users SET game_rubles=0, game_generators=\'[]\', game_meta_aura=$1 WHERE phone=$2',
+      [newMeta, phone]
+    );
+
+    res.json({ ok: true, earnedMeta, newMeta });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ═══════════════════════════════════════════════════════
 // СБРОС ПОДВАЛА (ТОЛЬКО ДЛЯ ПР)
 // ═══════════════════════════════════════════════════════
 app.post('/api/admin/reset', async (req, res) => {
