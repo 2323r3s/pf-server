@@ -1498,6 +1498,53 @@ app.post('/api/games/idle/prestige', async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════
+// РУБЛИ ДЛЯ ИГРЫ (IDLE)
+// ═══════════════════════════════════════════════════════
+
+// Хранилище в памяти (сбросится при рестарте Vercel).
+// Для надёжности замени на БД — см. вариант в конце.
+const pendingIdleRubles = {};
+
+// 1. ПР выдаёт рубли ЖИ
+app.post('/api/games/idle/give_rubles', async (req, res) => {
+  try {
+    const { adminPhone, targetPhone, amount } = req.body;
+    if (!adminPhone || !targetPhone || !amount) {
+      return res.status(400).json({ error: 'Не все поля' });
+    }
+    // Проверка, что adminPhone — ПР
+    const users = await db.query('SELECT status FROM users WHERE phone = $1', [adminPhone]);
+    if (!users.rows.length || users.rows[0].status !== 'ПР') {
+      return res.status(403).json({ error: 'Только ПР может выдавать рубли' });
+    }
+    const amt = parseInt(amount);
+    if (!amt || amt <= 0) return res.status(400).json({ error: 'Сумма должна быть больше 0' });
+
+    if (!pendingIdleRubles[targetPhone]) pendingIdleRubles[targetPhone] = 0;
+    pendingIdleRubles[targetPhone] += amt;
+
+    res.json({ ok: true, pending: pendingIdleRubles[targetPhone] });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Ошибка сервера' });
+  }
+});
+
+// 2. Сколько рублей ждёт игрока
+app.get('/api/games/idle/pending_rubles/:phone', (req, res) => {
+  const { phone } = req.params;
+  res.json({ pending: pendingIdleRubles[phone] || 0 });
+});
+
+// 3. Забрать рубли (обнулить на сервере)
+app.post('/api/games/idle/claim_rubles', (req, res) => {
+  const { phone } = req.body;
+  const amount = pendingIdleRubles[phone] || 0;
+  delete pendingIdleRubles[phone];
+  res.json({ ok: true, claimed: amount });
+});
+
+// ═══════════════════════════════════════════════════════
 // СБРОС ПОДВАЛА (ТОЛЬКО ДЛЯ ПР)
 // ═══════════════════════════════════════════════════════
 app.post('/api/admin/reset', async (req, res) => {
