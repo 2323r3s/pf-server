@@ -12,6 +12,9 @@ app.use(express.json({ limit: '50mb' })); // Увеличено для фото/
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
+  max: 5,                    // 5 подключений на один экземпляр Vercel
+  idleTimeoutMillis: 5000,   // Закрывать простаивающие соединения через 5 секунд
+  connectionTimeoutMillis: 5000,
 });
 
 pool.query('SELECT NOW()')
