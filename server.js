@@ -99,6 +99,19 @@ const initDB = async () => {
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_auto_debtor_at TIMESTAMP`);
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS farm_aura_applied BOOLEAN DEFAULT false`);
 
+    // ── ИГРА IDLE ──
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS game_rubles NUMERIC DEFAULT 0`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS game_generators JSONB DEFAULT '[]'::jsonb`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS game_meta_aura NUMERIC DEFAULT 0`);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS idle_pending_rubles (
+        phone TEXT PRIMARY KEY,
+        amount BIGINT NOT NULL DEFAULT 0,
+        updated_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+
     await pool.query(`
       CREATE TABLE IF NOT EXISTS news (
         id BIGINT PRIMARY KEY,
@@ -526,14 +539,6 @@ const initDB = async () => {
         created_at TIMESTAMP DEFAULT NOW()
       )
     `);
-
-    await pool.query(`
-  CREATE TABLE IF NOT EXISTS idle_pending_rubles (
-    phone TEXT PRIMARY KEY,
-    amount BIGINT NOT NULL DEFAULT 0,
-    updated_at TIMESTAMP DEFAULT NOW()
-  )
-`);
 
     await pool.query(`
       CREATE TABLE IF NOT EXISTS group_members (
@@ -1505,22 +1510,20 @@ app.post('/api/games/idle/prestige', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Выдача рублей (ПР)
+// Выдача рублей
 app.post('/api/games/idle/give_rubles', async (req, res) => {
   try {
     const { adminPhone, targetPhone, amount } = req.body;
     if (!adminPhone || !targetPhone || !amount) return res.status(400).json({ error: 'Не все поля' });
-
-    // Проверка ПР через pool
+    
+    // Проверка ПР
     const users = await pool.query('SELECT status FROM users WHERE phone = $1', [adminPhone]);
-    if (!users.rows.length || users.rows[0].status !== 'ПР') {
-      return res.status(403).json({ error: 'Только ПР' });
-    }
-
+    if (!users.rows.length || users.rows[0].status !== 'ПР') return res.status(403).json({ error: 'Только ПР' });
+    
     const amt = parseInt(amount);
     if (!amt || amt <= 0) return res.status(400).json({ error: 'Сумма > 0' });
 
-    // Записываем в БД (прибавляем к существующему)
+    // Записываем в БД
     await pool.query(`
       INSERT INTO idle_pending_rubles (phone, amount)
       VALUES ($1, $2)
@@ -1529,9 +1532,9 @@ app.post('/api/games/idle/give_rubles', async (req, res) => {
 
     const result = await pool.query('SELECT amount FROM idle_pending_rubles WHERE phone = $1', [targetPhone]);
     res.json({ ok: true, pending: parseInt(result.rows[0]?.amount || 0) });
-  } catch (e) {
+  } catch (e) { 
     console.error('give_rubles ERROR:', e);
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: e.message || 'Ошибка' }); 
   }
 });
 
@@ -1561,13 +1564,11 @@ app.post('/api/admin/reset', async (req, res) => {
     const { adminPhone } = req.body;
     if (!adminPhone) return res.status(400).json({ error: 'Bad params' });
 
-    // Проверяем, что это реально ПР
     const uRes = await pool.query('SELECT status FROM users WHERE phone=$1', [adminPhone]);
     if (uRes.rows.length === 0 || uRes.rows[0].status !== 'ПР') {
       return res.status(403).json({ error: 'Только ПР может сбросить подвал' });
     }
 
-    // Очищаем ВСЁ, кроме самого пользователя-ПР
     await pool.query('DELETE FROM users WHERE phone <> $1', [adminPhone]);
     await pool.query('DELETE FROM news');
     await pool.query('DELETE FROM bank');
@@ -1607,8 +1608,8 @@ app.post('/api/admin/reset', async (req, res) => {
     await pool.query('DELETE FROM chat_settings');
     await pool.query('DELETE FROM notifications');
     await pool.query('DELETE FROM fcm_tokens');
+    await pool.query('DELETE FROM idle_pending_rubles');
 
-    // Сбрасываем ПРу тонки и ауру на дефолт, чтобы начать жизнь с чистого листа
     await pool.query('UPDATE users SET tonki=10000, aura=28000 WHERE phone=$1', [adminPhone]);
 
     res.json({ ok: true, message: 'Подвал стерт. Остался только ты.' });
