@@ -1503,15 +1503,27 @@ const pendingIdleRubles = {};
 app.post('/api/games/idle/give_rubles', async (req, res) => {
   try {
     const { adminPhone, targetPhone, amount } = req.body;
-    if (!adminPhone || !targetPhone || !amount) return res.status(400).json({ error: 'Не все поля' });
-    // Проверка, что adminPhone — ПР
-    const users = await db.query('SELECT status FROM users WHERE phone = $1', [adminPhone]);
-    if (!users.rows.length || users.rows[0].status !== 'ПР') return res.status(403).json({ error: 'Только ПР' });
+    if (!adminPhone || !targetPhone || !amount) {
+      return res.status(400).json({ error: 'Не все поля' });
+    }
+
+    // Проверка, что adminPhone — ПР (используем pool, а не db)
+    const users = await pool.query('SELECT status FROM users WHERE phone = $1', [adminPhone]);
+    if (!users.rows.length || users.rows[0].status !== 'ПР') {
+      return res.status(403).json({ error: 'Только ПР' });
+    }
+
     const amt = parseInt(amount);
-    if (!amt || amt <= 0) return res.status(400).json({ error: 'Сумма > 0' });
+    if (!amt || amt <= 0) {
+      return res.status(400).json({ error: 'Сумма > 0' });
+    }
+
     pendingIdleRubles[targetPhone] = (pendingIdleRubles[targetPhone] || 0) + amt;
     res.json({ ok: true, pending: pendingIdleRubles[targetPhone] });
-  } catch (e) { res.status(500).json({ error: 'Ошибка' }); }
+  } catch (e) {
+    console.error('give_rubles ERROR:', e);
+    res.status(500).json({ error: e.message || 'Ошибка' });
+  }
 });
 
 app.get('/api/games/idle/pending_rubles/:phone', (req, res) => {
