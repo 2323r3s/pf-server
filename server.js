@@ -14,8 +14,12 @@ app.use(express.json({ limit: '50mb' })); // Увеличено для фото/
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  max: 5,
-  idleTimeoutMillis: 5000,
+  max: 1,                    // Оставляем 1, чтобы не забить лимит подключений
+  idleTimeoutMillis: 1000,
+  connectionTimeoutMillis: 5000,
+  ssl: {
+    rejectUnauthorized: false // <-- ВАЖНО: разрешаем подключение без строгой проверки сертификата
+  }
 });
 attachDatabasePool(pool);
 
