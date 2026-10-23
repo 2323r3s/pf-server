@@ -7,15 +7,17 @@ const admin = require('firebase-admin');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+const { attachDatabasePool } = require('@vercel/functions');
+
 app.use(cors());
 app.use(express.json({ limit: '50mb' })); // Увеличено для фото/видео
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  max: 5,                    // 5 подключений на один экземпляр Vercel
-  idleTimeoutMillis: 5000,   // Закрывать простаивающие соединения через 5 секунд
-  connectionTimeoutMillis: 5000,
+  max: 5,
+  idleTimeoutMillis: 5000,
 });
+attachDatabasePool(pool);
 
 pool.query('SELECT NOW()')
   .then(() => console.log('✅ PostgreSQL подключён'))
