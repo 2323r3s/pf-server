@@ -1512,29 +1512,29 @@ app.post('/api/bank_pf', async (req, res) => {
 // Получить состояние игры
 app.get('/api/games/idle/:phone', async (req, res) => {
   try {
-    const r = await pool.query('SELECT game_rubles, game_generators, game_meta_aura FROM users WHERE phone=$1', [req.params.phone]);
+    const r = await pool.query('SELECT game_rubles, game_generators, game_meta_aura, game_darwin, game_mell FROM users WHERE phone=$1', [req.params.phone]);
     if (r.rows.length === 0) return res.status(404).json({ error: 'Not found' });
     const u = r.rows[0];
     res.json({
       rubles: parseInt(u.game_rubles) || 0,
       generators: u.game_generators || [],
       metaAura: parseInt(u.game_meta_aura) || 0,
+      darwin: parseInt(u.game_darwin) || 0,
+      mell: parseInt(u.game_mell) || 0,
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Сохранить прогресс (клик / покупка)
+// Сохранить прогресс
 app.post('/api/games/idle/save', async (req, res) => {
   try {
-    const { phone, rubles, generators } = req.body;
+    const { phone, rubles, generators, metaAura, darwin, mell } = req.body;
     if (!phone) return res.status(400).json({ error: 'Bad params' });
-
-    // Защита от читов (проверяем, что генераторы - это массив)
     const safeGenerators = Array.isArray(generators) ? generators : [];
 
     await pool.query(
-      'UPDATE users SET game_rubles=$1, game_generators=$2 WHERE phone=$3',
-      [rubles, JSON.stringify(safeGenerators), phone]
+      'UPDATE users SET game_rubles=$1, game_generators=$2, game_meta_aura=$3, game_darwin=$4, game_mell=$5 WHERE phone=$6',
+      [rubles || 0, JSON.stringify(safeGenerators), metaAura || 0, darwin || 0, mell || 0, phone]
     );
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
