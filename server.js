@@ -556,6 +556,9 @@ const initDB = async () => {
       )
     `);
 
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS game_darwin INTEGER DEFAULT 0`);
+await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS game_mell INTEGER DEFAULT 0`);
+
     await pool.query(`
       CREATE TABLE IF NOT EXISTS chat_settings (
         phone TEXT NOT NULL,
