@@ -676,14 +676,13 @@ app.post('/api/achievements', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Сброс игры у игрока
 app.post('/api/games/idle/reset', async (req, res) => {
   try {
     const { phone } = req.body;
     if (!phone) return res.status(400).json({ error: 'Bad params' });
 
     await pool.query(
-      'UPDATE users SET game_rubles=0, game_generators=\'[]\', game_meta_aura=0 WHERE phone=$1',
+      'UPDATE users SET game_rubles=0, game_generators=\'[]\', game_meta_aura=0, game_darwin=0, game_mell=0 WHERE phone=$1',
       [phone]
     );
 
