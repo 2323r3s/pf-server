@@ -644,6 +644,36 @@ const sendPushNotification = async (phone, title, body, target, targetId) => {
 };
 
 // ═══════════════════════════════════════════════════════
+// ВЫДАЧА ДОСТИЖЕНИЙ (ПР)
+// ═══════════════════════════════════════════════════════
+app.post('/api/achievements', async (req, res) => {
+  try {
+    const { phone, achievementId, title, desc } = req.body;
+    if (!phone || !achievementId) return res.status(400).json({ error: 'Bad params' });
+
+    // 1. Сохраняем в базу
+    await pool.query(
+      `INSERT INTO achievements (id, phone, achievement_id, granted_by)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (phone, achievement_id) DO NOTHING`,
+      [Date.now(), phone, achievementId, 'ПР']
+    );
+
+    // 2. Создаем уведомление (в колокольчик) И отправляем пуш
+    await createNotification(
+      phone, 
+      'reward', 
+      `🏆 Достижение: ${title}`, 
+      desc || 'Выдано Президентом', 
+      'achievements', 
+      null
+    );
+
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ═══════════════════════════════════════════════════════
 // УВЕДОМЛЕНИЯ (помощник)
 // ═══════════════════════════════════════════════════════
 const createNotification = async (phone, type, title, text, target, targetId) => {
