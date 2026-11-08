@@ -104,6 +104,7 @@ const initDB = async () => {
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_auto_credit_at TIMESTAMP`);
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_auto_debtor_at TIMESTAMP`);
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS farm_aura_applied BOOLEAN DEFAULT false`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS casino_blocked_until TIMESTAMP`);
 
     // ── ИГРА IDLE ──
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS game_rubles NUMERIC DEFAULT 0`);
