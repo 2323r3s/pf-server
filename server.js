@@ -717,6 +717,32 @@ const createNotification = async (phone, type, title, text, target, targetId) =>
   }
 };
 
+app.post('/api/casino/block', async (req, res) => {
+  try {
+    const { phone, hours } = req.body;
+    if (!phone || !hours) return res.status(400).json({ error: 'Bad params' });
+
+    const until = new Date(Date.now() + hours * 60 * 60 * 1000);
+    await pool.query('UPDATE users SET casino_blocked_until=$1 WHERE phone=$2', [until, phone]);
+
+    res.json({ ok: true, until: until.toISOString() });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+const { phone, name, bet, mode = 'classic' } = req.body;
+
+// 🆕 Проверка блокировки
+const userRes0 = await pool.query('SELECT casino_blocked_until FROM users WHERE phone=$1', [phone]);
+if (userRes0.rows.length > 0) {
+  const blockedUntil = userRes0.rows[0].casino_blocked_until;
+  if (blockedUntil && new Date(blockedUntil) > new Date()) {
+    const remainingMs = new Date(blockedUntil).getTime() - Date.now();
+    const h = Math.floor(remainingMs / 3600000);
+    const m = Math.floor((remainingMs % 3600000) / 60000);
+    return res.status(403).json({ error: `Казино заблокировано ещё на ${h}ч ${m}м` });
+  }
+}
+
 // ═══════════════════════════════════════════════════════
 // FCM ТОКЕНЫ И HEARTBEAT
 // ═══════════════════════════════════════════════════════
