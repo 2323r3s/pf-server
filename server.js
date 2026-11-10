@@ -1959,6 +1959,63 @@ app.get('/api/casino/daily/:phone', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ═══════════════════════════════════════════════════════
+// РАНСОМ (ПР запускает, клиенты опрашивают)
+// ═══════════════════════════════════════════════════════
+app.post('/api/ransom/trigger', async (req, res) => {
+  try {
+    const { adminPhone, target, amount } = req.body;
+    if (!adminPhone || !target) return res.status(400).json({ error: 'Bad params' });
+
+    const adminRes = await pool.query('SELECT status FROM users WHERE phone=$1', [adminPhone]);
+    if (adminRes.rows.length === 0 || adminRes.rows[0].status !== 'ПР') {
+      return res.status(403).json({ error: 'Только ПР' });
+    }
+
+    const amt = parseInt(amount) || 1000;
+
+    if (target === 'self') {
+      await pool.query(
+        `INSERT INTO active_ransoms (phone, amount, created_by)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (phone) DO UPDATE SET amount=$2, created_at=NOW()`,
+        [adminPhone, amt, adminPhone]
+      );
+      return res.json({ ok: true, count: 1 });
+    }
+
+    if (target === 'all') {
+      const usersRes = await pool.query("SELECT phone FROM users WHERE status <> 'ПР'");
+      for (const u of usersRes.rows) {
+        await pool.query(
+          `INSERT INTO active_ransoms (phone, amount, created_by)
+           VALUES ($1, $2, $3)
+           ON CONFLICT (phone) DO UPDATE SET amount=$2, created_at=NOW()`,
+          [u.phone, amt, adminPhone]
+        );
+      }
+      return res.json({ ok: true, count: usersRes.rows.length });
+    }
+
+    res.status(400).json({ error: 'target: self | all' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/ransom/check/:phone', async (req, res) => {
+  try {
+    const r = await pool.query('SELECT amount FROM active_ransoms WHERE phone=$1', [req.params.phone]);
+    if (r.rows.length === 0) return res.json({ active: false });
+    res.json({ active: true, amount: r.rows[0].amount });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/ransom/:phone', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM active_ransoms WHERE phone=$1', [req.params.phone]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.post('/api/casino/permission', async (req, res) => {
   try {
     const { phone, grantedBy } = req.body;
