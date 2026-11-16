@@ -14,9 +14,10 @@ app.use(express.json({ limit: '50mb' })); // Увеличено для фото/
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  max: 1,                    // Оставляем 1 для лимита ZevCloud
-  idleTimeoutMillis: 1000,
-  connectionTimeoutMillis: 5000,
+  max: 10, // Увеличиваем, чтобы запросы не ждали в очереди
+  idleTimeoutMillis: 5000, // Закрываем простаивающие соединения через 5 сек
+  connectionTimeoutMillis: 10000, // Ждем соединения до 10 сек
+  keepAlive: true, // Поддерживаем соединение живым
 });
 attachDatabasePool(pool);
 
