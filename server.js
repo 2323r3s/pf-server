@@ -791,9 +791,7 @@ app.post('/api/casino/block', async (req, res) => {
 
     res.json({ ok: true, until: until.toISOString() });
   } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-const { phone, name, bet, mode = 'classic' } = req.body;
+  const { phone, name, bet, mode = 'classic' } = req.body;
 
 // 🆕 Проверка блокировки
 const userRes0 = await pool.query('SELECT casino_blocked_until FROM users WHERE phone=$1', [phone]);
@@ -806,6 +804,9 @@ if (userRes0.rows.length > 0) {
     return res.status(403).json({ error: `Казино заблокировано ещё на ${h}ч ${m}м` });
   }
 }
+});
+
+
 
 // ═══════════════════════════════════════════════════════
 // FCM ТОКЕНЫ И HEARTBEAT
