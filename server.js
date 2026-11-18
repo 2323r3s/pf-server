@@ -1767,19 +1767,21 @@ app.post('/api/casino/spin', async (req, res) => {
       return res.status(400).json({ error: 'Ставка 20-1000' });
     }
     
-
     const isSport = mode === 'sport';
 
     const userRes = await pool.query('SELECT * FROM users WHERE phone=$1', [phone]);
     if (userRes.rows.length === 0) return res.status(404).json({ error: 'Not found' });
-    if (user.casino_blocked_until && new Date(user.casino_blocked_until) > new Date()) {
-  const ms = new Date(user.casino_blocked_until).getTime() - Date.now();
-  const h = Math.floor(ms / 3600000), m = Math.floor((ms % 3600000) / 60000);
-  return res.status(403).json({ error: `Казино заблокировано ещё на ${h}ч ${m}м` });
-}
+    
+    // ✅ СНАЧАЛА объявляем user
     const user = userRes.rows[0];
     const isPR = user.status === 'ПР';
-    
+
+    // ✅ ТЕПЕРЬ проверяем блокировку
+    if (user.casino_blocked_until && new Date(user.casino_blocked_until) > new Date()) {
+      const ms = new Date(user.casino_blocked_until).getTime() - Date.now();
+      const h = Math.floor(ms / 3600000), m = Math.floor((ms % 3600000) / 60000);
+      return res.status(403).json({ error: `Казино заблокировано ещё на ${h}ч ${m}м` });
+    }
 
     if (!isPR) {
       const permRes = await pool.query('SELECT * FROM casino_permission WHERE phone=$1', [phone]);
