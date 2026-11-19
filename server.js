@@ -1757,6 +1757,23 @@ app.post('/api/admin/reset', async (req, res) => {
   }
 });
 
+app.post('/api/settings/music', async (req, res) => {
+  try {
+    const { phone, trackIndex } = req.body;
+    if (!phone || typeof trackIndex !== 'number') {
+      return res.status(400).json({ error: 'Bad params' });
+    }
+    
+    // Сохраняем в базу (нужна колонка music_track в таблице users)
+    await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS music_track INTEGER DEFAULT 0');
+    await pool.query('UPDATE users SET music_track=$1 WHERE phone=$2', [trackIndex, phone]);
+    
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ═══════════════════════════════════════════════════════
 // КАЗИНО
 // ═══════════════════════════════════════════════════════
