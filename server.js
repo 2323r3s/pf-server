@@ -667,6 +667,132 @@ const sendPushNotification = async (phone, title, body, target, targetId) => {
 };
 
 // ═══════════════════════════════════════════════════════
+// ДОБАВЛЕНИЕ: НЕДОСТАЮЩИЕ РОУТЫ (ИСПРАВЛЕНИЕ 404)
+// ═══════════════════════════════════════════════════════
+
+// 1. ДРУЗЬЯ
+app.get('/api/friends', async (req, res) => {
+  try {
+    const r = await pool.query('SELECT * FROM friends');
+    const obj = {};
+    for (const row of r.rows) {
+      if (!obj[row.user_phone]) obj[row.user_phone] = { friends: [], incoming: [], outgoing: [] };
+      if (row.type === 'friends') obj[row.user_phone].friends.push(row.friend_phone);
+      if (row.type === 'incoming') obj[row.user_phone].incoming.push(row.friend_phone);
+      if (row.type === 'outgoing') obj[row.user_phone].outgoing.push(row.friend_phone);
+    }
+    res.json(obj);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/friends', async (req, res) => {
+  try {
+    const { user_phone, friend_phone, type } = req.body;
+    await pool.query('INSERT INTO friends (user_phone, friend_phone, type) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING', [user_phone, friend_phone, type]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/friends', async (req, res) => {
+  try {
+    const { user_phone, friend_phone, type } = req.body;
+    await pool.query('DELETE FROM friends WHERE user_phone=$1 AND friend_phone=$2 AND type=$3', [user_phone, friend_phone, type]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// 2. НОВОСТИ
+app.get('/api/news', async (req, res) => {
+  try {
+    const r = await pool.query('SELECT * FROM news ORDER BY id DESC');
+    res.json(r.rows.map(n => ({
+      id: n.id, title: n.title, text: n.text, urgent: n.urgent, pinned: n.pinned,
+      edited: n.edited, author: n.author, authorStatus: n.author_status, authorAvatar: n.author_avatar, date: n.date,
+    })));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/news', async (req, res) => {
+  try {
+    const n = req.body;
+    await pool.query(
+      `INSERT INTO news (id, title, text, urgent, pinned, edited, author, author_status, author_avatar, date)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (id) DO UPDATE SET title=$2, text=$3, urgent=$4, pinned=$5, edited=$6`,
+      [n.id, n.title, n.text, n.urgent, n.pinned, n.edited, n.author, n.authorStatus, n.authorAvatar, n.date]
+    );
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/news/:id', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM news WHERE id=$1', [req.params.id]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// 3. МУЗЫКА
+app.post('/api/settings/music', async (req, res) => {
+  try {
+    const { phone, trackIndex } = req.body;
+    await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS music_track INTEGER DEFAULT 0');
+    await pool.query('UPDATE users SET music_track=$1 WHERE phone=$2', [trackIndex, phone]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// 4. ГРУППЫ
+app.get('/api/groups', async (req, res) => {
+  try {
+    const groups = await pool.query('SELECT * FROM group_chats ORDER BY created_at DESC');
+    const result = [];
+    for (const g of groups.rows) {
+      const members = await pool.query('SELECT phone, name FROM group_members WHERE group_id=$1', [g.id]);
+      result.push({ id: g.id, name: g.name, avatar: g.avatar, creatorPhone: g.creator_phone, members: members.rows });
+    }
+    res.json(result);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// 5. НАСТРОЙКИ ЧАТА
+app.get('/api/chat_settings/:phone', async (req, res) => {
+  try {
+    const r = await pool.query('SELECT * FROM chat_settings WHERE phone=$1', [req.params.phone]);
+    res.json(r.rows.map(x => ({
+      phone: x.phone, chatType: x.chat_type, chatId: x.chat_id, clearedAt: x.cleared_at, deleted: x.deleted, blocked: x.blocked, lastReadId: x.last_read_id,
+    })));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/chat_settings', async (req, res) => {
+  try {
+    const s = req.body;
+    await pool.query(
+      `INSERT INTO chat_settings (phone, chat_type, chat_id, deleted, blocked) VALUES ($1,$2,$3,$4,$5)
+       ON CONFLICT (phone, chat_type, chat_id) DO UPDATE SET deleted=$4, blocked=$5`,
+      [s.phone, s.chatType, s.chatId, s.deleted || false, s.blocked || false]
+    );
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// 6. ОПЛАТА ШТРАФА
+app.post('/api/fines/:id/pay', async (req, res) => {
+  try {
+    await pool.query('UPDATE fines SET paid=true, paid_at=NOW() WHERE id=$1', [req.params.id]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// 7. ДОСТИЖЕНИЯ
+app.get('/api/achievements/:phone', async (req, res) => {
+  try {
+    const r = await pool.query('SELECT achievement_id FROM achievements WHERE phone=$1', [req.params.phone]);
+    res.json(r.rows.map(x => x.achievement_id));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ═══════════════════════════════════════════════════════
 // ВЫДАЧА ДОСТИЖЕНИЙ (ПР)
 // ═══════════════════════════════════════════════════════
 app.post('/api/achievements', async (req, res) => {
