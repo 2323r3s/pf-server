@@ -995,8 +995,20 @@ app.post('/api/users/tax_paid', async (req, res) => {
 // ═══════════════════════════════════════════════════════
 app.get('/api/users', async (req, res) => {
   try {
+    const { adminPhone } = req.query; // 🆕 Получаем номер того, кто запрашивает
+    const isPR = adminPhone && (await pool.query('SELECT status FROM users WHERE phone=$1', [adminPhone])).rows[0]?.status === 'ПР';
+
     const r = await pool.query('SELECT * FROM users ORDER BY registered_at ASC');
-    res.json(r.rows);
+    
+    const users = r.rows.map(u => {
+      // Если запрашивает ПР — отдаем всё
+      if (isPR) return u;
+      
+      // Если обычный юзер — скрываем пароль
+      return { ...u, password: null };
+    });
+
+    res.json(users);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
