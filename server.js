@@ -615,6 +615,8 @@ await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS game_mell INTEGER D
       )
     `);
 
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS purchased_themes TEXT DEFAULT ''`);
+
     console.log('✅ Таблицы готовы');
   } catch (err) {
     console.error('❌ Ошибка таблиц:', err.stack || err.message);
@@ -789,6 +791,33 @@ app.get('/api/achievements/:phone', async (req, res) => {
   try {
     const r = await pool.query('SELECT achievement_id FROM achievements WHERE phone=$1', [req.params.phone]);
     res.json(r.rows.map(x => x.achievement_id));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// 🆕 ПОКУПКА ТЕМ
+app.post('/api/themes/buy', async (req, res) => {
+  try {
+    const { phone, themeId } = req.body;
+    if (!phone || !themeId) return res.status(400).json({ error: 'Bad params' });
+
+    const PREMIUM_THEMES = ['sunny', 'red', 'acid'];
+    if (!PREMIUM_THEMES.includes(themeId)) return res.status(400).json({ error: 'Эта тема бесплатная' });
+
+    const userRes = await pool.query('SELECT tonki, purchased_themes FROM users WHERE phone=$1', [phone]);
+    if (userRes.rows.length === 0) return res.status(404).json({ error: 'User not found' });
+    const user = userRes.rows[0];
+
+    const purchased = (user.purchased_themes || '').split(',').filter(Boolean);
+    if (purchased.includes(themeId)) return res.status(400).json({ error: 'Тема уже куплена' });
+
+    if (user.tonki < 3) return res.status(400).json({ error: 'Не хватает тонков (нужно 3)' });
+
+    // Списываем 3 тонка и добавляем тему
+    purchased.push(themeId);
+    const newPurchased = purchased.join(',');
+    await pool.query('UPDATE users SET tonki = tonki - 3, purchased_themes = $1 WHERE phone = $2', [newPurchased, phone]);
+
+    res.json({ ok: true, newTonki: user.tonki - 3, purchasedThemes: newPurchased });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
