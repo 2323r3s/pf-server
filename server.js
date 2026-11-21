@@ -1119,19 +1119,20 @@ app.post('/api/users', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Создать группу
 app.post('/api/groups', async (req, res) => {
   try {
-    const { name, avatar, creatorPhone, members } = req.body;
-    if (!name || !creatorPhone) return res.status(400).json({ error: 'Нужно название и создатель' });
+    const { id, name, avatar, creatorPhone, members } = req.body;
+    if (!name || !creatorPhone) {
+      return res.status(400).json({ error: 'Нужно название и создатель' });
+    }
 
-    const created = await pool.query(
-      'INSERT INTO group_chats (name, avatar, creator_phone) VALUES ($1, $2, $3) RETURNING id',
-      [name, avatar || null, creatorPhone]
+    const groupId = id || Date.now();
+
+    await pool.query(
+      'INSERT INTO group_chats (id, name, avatar, creator_phone) VALUES ($1, $2, $3, $4)',
+      [groupId, name, avatar || null, creatorPhone]
     );
-    const groupId = created.rows[0].id;
 
-    // Добавляем участников (включая создателя)
     const uniqueMembers = Array.isArray(members) ? members : [];
     for (const m of uniqueMembers) {
       await pool.query(
@@ -1145,6 +1146,7 @@ app.post('/api/groups', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
 
 // Получить сообщения группы
 app.get('/api/groups/:id/messages', async (req, res) => {
