@@ -2268,8 +2268,9 @@ app.post('/api/casino/spin', async (req, res) => {
 
     // 🆕 Символы: спорт — шляпа вместо банана
     const symbols = isSport
-      ? ['🍎', '🍇', '🍑', '🎩']
+      ? ['🍎', '🍇', '🍑', '/shlapa.png']
       : ['🍎', '🍇', '🍑', '🍌'];
+
 
     // 🆕 Веса: спорт — шанс на шляпу чуть выше (5 вместо 3)
     const weights = isSport
@@ -2291,7 +2292,7 @@ app.post('/api/casino/spin', async (req, res) => {
     const appleCount = reels.filter(r => r === '🍎').length;
     const grapeCount = reels.filter(r => r === '🍇').length;
     const plumCount = reels.filter(r => r === '🍑').length;
-    const jackpotSymbol = isSport ? '🎩' : '🍌';
+  const jackpotSymbol = isSport ? '/shlapa.png' : '🍌';
     const jackpotCount = reels.filter(r => r === jackpotSymbol).length;
 
     // 🆕 Множитель ×3 для спорта
