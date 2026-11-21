@@ -2207,6 +2207,47 @@ app.post('/api/settings/music', async (req, res) => {
   }
 });
 
+app.post('/api/doc_requests', async (req, res) => {
+  try {
+    const a = req.body;
+    await pool.query(
+      `INSERT INTO doc_requests (id, user_phone, user_name, doc_type, status, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6)
+       ON CONFLICT (id) DO UPDATE SET status=$5, pr_comment=$7, resolved_at=$8, resolved_by=$9`,
+      [a.id, a.userPhone, a.userName, a.docType, a.status || 'pending', a.createdAt, a.prComment || null, a.resolvedAt || null, a.resolvedBy || null]
+    );
+
+    // 🆕 Если заявка новая — шлем уведомление ПР
+    if (a.status === 'pending') {
+      // Ищем ПР в базе
+      const prRes = await pool.query("SELECT phone FROM users WHERE status='ПР' LIMIT 1");
+      if (prRes.rows.length > 0) {
+        const prPhone = prRes.rows[0].phone;
+        // Названия для уведомления
+        const docNames = {
+          pension: '💰 Пенсия',
+          insurance: '🛡️ Страховка',
+          casino_permit: '🎰 Разрешение на казик',
+          pm_status: '💎 Статус ПМ/ПЗ'
+        };
+        const docName = docNames[a.docType] || a.docType;
+
+        // Создаем уведомление (колокольчик + пуш)
+        await createNotification(
+          prPhone, 
+          'request', 
+          `📄 Новая заявка на документ`, 
+          `${a.userName} подал(а) заявку на: ${docName}`, 
+          'doc_requests', // чтобы при клике открывалась вкладка заявок
+          null
+        );
+      }
+    }
+
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // ═══════════════════════════════════════════════════════
 // КАЗИНО
 // ═══════════════════════════════════════════════════════
