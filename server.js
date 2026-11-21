@@ -1812,45 +1812,53 @@ app.post('/api/private/:chatId/clear', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Получить сообщения группы (по пути, который использует фронтенд)
 app.get('/api/group_messages/:groupId', async (req, res) => {
   try {
-    const r = await pool.query(
-      'SELECT * FROM group_messages WHERE group_id=$1 ORDER BY id ASC LIMIT 200',
-      [req.params.groupId]
+    const { groupId } = req.params;
+    if (!groupId || groupId === 'undefined' || groupId === 'null') {
+      return res.json([]);
+    }
+    const rows = await pool.query(
+      'SELECT * FROM group_messages WHERE group_id=$1 ORDER BY id ASC',
+      [groupId]
     );
-    res.json(r.rows.map(m => ({
-      id: m.id, groupId: m.group_id,
-      from: m.from_phone, fromName: m.from_name, fromAvatar: m.from_avatar,
-      text: m.text, replyTo: m.reply_to,
-      voice: m.voice, voiceDuration: m.voice_duration,
-      image: m.image, video: m.video,
-      time: m.time, date: m.date,
+    res.json(rows.rows.map(r => ({
+      id: Number(r.id),
+      groupId: Number(r.group_id),
+      from: r.from_phone,
+      fromName: r.from_name,
+      fromAvatar: r.from_avatar,
+      text: r.text,
+      image: r.image,
+      video: r.video,
+      voice: r.voice,
+      voiceDuration: r.voice_duration,
+      replyTo: r.reply_to ? Number(r.reply_to) : null,
+      time: r.time,
+      date: r.date,
     })));
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
+// Отправить сообщение (или предмет) в группу
 app.post('/api/group_messages', async (req, res) => {
   try {
-    const m = req.body;
+    const { id, groupId, from, fromName, fromAvatar, text, image, video, voice, voiceDuration, replyTo, time, date } = req.body;
+    if (!groupId) return res.status(400).json({ error: 'Не указан groupId' });
+
     await pool.query(
-      `INSERT INTO group_messages (id, group_id, from_phone, from_name, from_avatar, text, reply_to, voice, voice_duration, image, video, time, date)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) ON CONFLICT (id) DO NOTHING`,
-      [m.id, m.groupId, m.from, m.fromName, m.fromAvatar || null, m.text || '', m.replyTo || null, m.voice || null, m.voiceDuration || null, m.image || null, m.video || null, m.time, m.date || null]
+      `INSERT INTO group_messages 
+       (id, group_id, from_phone, from_name, from_avatar, text, image, video, voice, voice_duration, reply_to, time, date)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+      [id || Date.now(), groupId, from, fromName, fromAvatar || null, text || '', image || null, video || null, voice || null, voiceDuration || null, replyTo || null, time, date]
     );
-
-    const groupRes = await pool.query('SELECT name FROM group_chats WHERE id=$1', [m.groupId]);
-    const groupName = groupRes.rows[0]?.name || 'Группа';
-    const membersRes = await pool.query(
-      'SELECT phone FROM group_members WHERE group_id=$1 AND phone <> $2',
-      [m.groupId, m.from]
-    );
-    const preview = m.voice ? '🎤 Голосовое' : m.image ? '🖼️ Фото' : m.video ? '🎬 Видео' : (m.text || '').slice(0, 60);
-    for (const mbr of membersRes.rows) {
-      await createNotification(mbr.phone, 'message', `💬 ${groupName}`, `${m.fromName}: ${preview}`, 'group_chat', String(m.groupId));
-    }
-
     res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.post('/api/group_messages/:groupId/clear', async (req, res) => {
