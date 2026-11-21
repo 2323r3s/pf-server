@@ -2248,6 +2248,27 @@ app.post('/api/doc_requests', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+app.get('/api/doc_requests', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM doc_requests ORDER BY created_at DESC');
+    const mapped = result.rows.map(r => ({
+      id: r.id,
+      userPhone: r.user_phone,
+      userName: r.user_name,
+      docType: r.doc_type,
+      status: r.status || 'pending',
+      createdAt: r.created_at,
+      prComment: r.pr_comment || '',
+      resolvedAt: r.resolved_at || null,
+      resolvedBy: r.resolved_by || null,
+    }));
+    res.json(mapped);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
 // ═══════════════════════════════════════════════════════
 // КАЗИНО
 // ═══════════════════════════════════════════════════════
