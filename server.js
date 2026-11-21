@@ -401,6 +401,57 @@ await pool.query(`
       )
     `);
 
+      // Сообщения в группах
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS group_messages (
+      id BIGINT PRIMARY KEY,
+      group_id INTEGER REFERENCES group_chats(id) ON DELETE CASCADE,
+      from_phone TEXT NOT NULL,
+      from_name TEXT,
+      from_avatar TEXT,
+      text TEXT,
+      image TEXT,
+      video TEXT,
+      voice TEXT,
+      voice_duration TEXT,
+      reply_to BIGINT,
+      time TEXT,
+      date TEXT
+    )
+  `);
+
+  // Реакции на сообщения (личные, групповые, общие)
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS message_reactions (
+      id SERIAL PRIMARY KEY,
+      message_id BIGINT NOT NULL,
+      chat_type TEXT NOT NULL,
+      chat_id TEXT,
+      from_phone TEXT NOT NULL,
+      from_name TEXT,
+      emoji TEXT NOT NULL,
+      UNIQUE(message_id, chat_type, from_phone, emoji)
+    )
+  `);
+
+  // Настройки чатов (блокировка, удаление из списка)
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS chat_settings (
+      phone TEXT NOT NULL,
+      chat_type TEXT NOT NULL,
+      chat_id TEXT NOT NULL,
+      deleted BOOLEAN DEFAULT FALSE,
+      blocked BOOLEAN DEFAULT FALSE,
+      PRIMARY KEY (phone, chat_type, chat_id)
+    )
+  `);
+
+  // Колонка выбранной музыки в таблице пользователей (если таблицы users нет — проигнорируется)
+  await pool.query(`
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS music_track INTEGER DEFAULT 0
+  `).catch(() => {});
+
+
     await pool.query(`
       CREATE TABLE IF NOT EXISTS professions (
         phone TEXT NOT NULL,
@@ -1067,6 +1118,213 @@ app.post('/api/users', async (req, res) => {
     res.json({ ok: true, demoted });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
+
+// Создать группу
+app.post('/api/groups', async (req, res) => {
+  try {
+    const { name, avatar, creatorPhone, members } = req.body;
+    if (!name || !creatorPhone) return res.status(400).json({ error: 'Нужно название и создатель' });
+
+    const created = await pool.query(
+      'INSERT INTO group_chats (name, avatar, creator_phone) VALUES ($1, $2, $3) RETURNING id',
+      [name, avatar || null, creatorPhone]
+    );
+    const groupId = created.rows[0].id;
+
+    // Добавляем участников (включая создателя)
+    const uniqueMembers = Array.isArray(members) ? members : [];
+    for (const m of uniqueMembers) {
+      await pool.query(
+        'INSERT INTO group_members (group_id, phone, name) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING',
+        [groupId, m.phone, m.name]
+      );
+    }
+
+    res.json({ ok: true, id: groupId });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Получить сообщения группы
+app.get('/api/groups/:id/messages', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const rows = await pool.query(
+      'SELECT * FROM group_messages WHERE group_id=$1 ORDER BY id ASC',
+      [id]
+    );
+    res.json(rows.rows.map(r => ({
+      id: Number(r.id),
+      groupId: r.group_id,
+      from: r.from_phone,
+      fromName: r.from_name,
+      fromAvatar: r.from_avatar,
+      text: r.text,
+      image: r.image,
+      video: r.video,
+      voice: r.voice,
+      voiceDuration: r.voice_duration,
+      replyTo: r.reply_to ? Number(r.reply_to) : null,
+      time: r.time,
+      date: r.date,
+    })));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Отправить сообщение (или предмет) в группу
+app.post('/api/groups/:id/messages', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { id: msgId, from, fromName, fromAvatar, text, image, video, voice, voiceDuration, replyTo, time, date } = req.body;
+
+    await pool.query(
+      `INSERT INTO group_messages 
+       (id, group_id, from_phone, from_name, from_avatar, text, image, video, voice, voice_duration, reply_to, time, date)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+      [msgId || Date.now(), id, from, fromName, fromAvatar || null, text || '', image || null, video || null, voice || null, voiceDuration || null, replyTo || null, time, date]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Переименовать группу
+app.post('/api/groups/:id/rename', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name } = req.body;
+    await pool.query('UPDATE group_chats SET name=$1 WHERE id=$2', [name, id]);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Обновить аватар группы
+app.post('/api/groups/:id/avatar', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { avatar } = req.body;
+    await pool.query('UPDATE group_chats SET avatar=$1 WHERE id=$2', [avatar, id]);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Добавить участника в группу
+app.post('/api/groups/:id/members', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { phone, name } = req.body;
+    await pool.query(
+      'INSERT INTO group_members (group_id, phone, name) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING',
+      [id, phone, name]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Удалить участника из группы
+app.delete('/api/groups/:id/members/:phone', async (req, res) => {
+  try {
+    const { id, phone } = req.params;
+    await pool.query('DELETE FROM group_members WHERE group_id=$1 AND phone=$2', [id, phone]);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Очистить сообщения группы
+app.delete('/api/groups/:id/messages', async (req, res) => {
+  try {
+    const { id } = req.params;
+    await pool.query('DELETE FROM group_messages WHERE group_id=$1', [id]);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Удалить группу целиком
+app.delete('/api/groups/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    await pool.query('DELETE FROM group_chats WHERE id=$1', [id]);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 5. РЕАКЦИИ (нужны и для обычных эмодзи, и для защиты подарков 🎁 в группе)
+app.get('/api/reactions', async (req, res) => {
+  try {
+    const { chat_type, chat_id, message_ids } = req.query;
+    if (!message_ids) return res.json([]);
+    const ids = String(message_ids).split(',').map(Number).filter(Boolean);
+    if (ids.length === 0) return res.json([]);
+
+    const rows = await pool.query(
+      'SELECT * FROM message_reactions WHERE chat_type=$1 AND message_id = ANY($2::bigint[])',
+      [chat_type, ids]
+    );
+    res.json(rows.rows.map(r => ({
+      id: r.id,
+      messageId: Number(r.message_id),
+      chatType: r.chat_type,
+      chatId: r.chat_id,
+      fromPhone: r.from_phone,
+      fromName: r.from_name,
+      emoji: r.emoji,
+    })));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/reactions', async (req, res) => {
+  try {
+    const { messageId, chatType, chatId, fromPhone, fromName, emoji } = req.body;
+    const existing = await pool.query(
+      'SELECT id FROM message_reactions WHERE message_id=$1 AND chat_type=$2 AND from_phone=$3 AND emoji=$4',
+      [messageId, chatType, fromPhone, emoji]
+    );
+
+    if (existing.rows.length > 0) {
+      await pool.query('DELETE FROM message_reactions WHERE id=$1', [existing.rows[0].id]);
+      return res.json({ ok: true, action: 'removed' });
+    }
+
+    await pool.query(
+      'INSERT INTO message_reactions (message_id, chat_type, chat_id, from_phone, from_name, emoji) VALUES ($1, $2, $3, $4, $5, $6)',
+      [messageId, chatType, chatId || null, fromPhone, fromName, emoji]
+    );
+    res.json({ ok: true, action: 'added' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 6. СОХРАНЕНИЕ ВЫБРАННОГО ТРЕКА МУЗЫКИ
+app.post('/api/settings/music', async (req, res) => {
+  try {
+    const { phone, trackIndex } = req.body;
+    if (!phone) return res.json({ ok: false });
+    await pool.query('UPDATE users SET music_track=$1 WHERE phone=$2', [Number(trackIndex) || 0, phone]);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 
 app.post('/api/users/bonus_aura', async (req, res) => {
   try {
