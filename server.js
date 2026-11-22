@@ -2328,16 +2328,15 @@ app.post('/api/casino/spin', async (req, res) => {
       return res.status(400).json({ error: 'Недостаточно тонков', need: bet - user.tonki });
     }
 
-    // 🆕 Символы: спорт — шляпа вместо банана
+    // 🆕 Добавляем картинку штамма в список символов
     const symbols = isSport
-      ? ['🍎', '🍇', '🍑', '/shlapa.png']
-      : ['🍎', '🍇', '🍑', '🍌'];
+      ? ['🍎', '🍇', '🍑', '🎩', '/shtammm.png']
+      : ['🍎', '🍇', '🍑', '🍌', '/shtammm.png'];
 
-
-    // 🆕 Веса: спорт — шанс на шляпу чуть выше (5 вместо 3)
+    // 🆕 Веса: штамм выпадает очень часто (30 из 100)
     const weights = isSport
-      ? [32, 32, 30, 6]
-      : [34, 33, 30, 3];
+      ? [20, 20, 20, 5, 35]
+      : [20, 20, 20, 3, 37]; 
 
     const pickWeighted = () => {
       const total = weights.reduce((s, w) => s + w, 0);
@@ -2354,16 +2353,31 @@ app.post('/api/casino/spin', async (req, res) => {
     const appleCount = reels.filter(r => r === '🍎').length;
     const grapeCount = reels.filter(r => r === '🍇').length;
     const plumCount = reels.filter(r => r === '🍑').length;
-  const jackpotSymbol = isSport ? '/shlapa.png' : '🍌';
+    const jackpotSymbol = isSport ? '🎩' : '🍌';
     const jackpotCount = reels.filter(r => r === jackpotSymbol).length;
+    
+    // 🆕 Считаем штаммы
+    const stampCount = reels.filter(r => r === '/shtammm.png').length;
 
-    // 🆕 Множитель ×3 для спорта
     const M = isSport ? 3 : 1;
-
     let winAmount = 0;
     let prizeType = 'lose';
 
-    if (jackpotCount === 3) { winAmount = Math.floor(bet * 16 * M); prizeType = 'jackpot_banana'; }
+    // 🆕 ЛОГИКА ШТАММА (АНТИ-ИКСОВ)
+    if (stampCount === 3) {
+      winAmount = Math.floor(bet * 0); // 0x (полный проигрыш)
+      prizeType = 'stamp_triple';
+    } 
+    else if (stampCount === 2) {
+      winAmount = Math.floor(bet * 0.3); // 0.3x
+      prizeType = 'stamp_double';
+    }
+    else if (stampCount === 1) {
+      winAmount = Math.floor(bet * 0.6); // 0.6x
+      prizeType = 'stamp_single';
+    }
+    // Если штаммов нет — играем по старой логике
+    else if (jackpotCount === 3) { winAmount = Math.floor(bet * 16 * M); prizeType = 'jackpot_banana'; }
     else if (jackpotCount === 2) { winAmount = Math.floor(bet * 8 * M); prizeType = 'double_banana'; }
     else if (jackpotCount === 1) { winAmount = Math.floor(bet * 4 * M); prizeType = 'banana'; }
     else if (appleCount === 3) { winAmount = Math.floor(bet * 2 * M); prizeType = 'triple_apple'; }
