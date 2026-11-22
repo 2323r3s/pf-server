@@ -2327,13 +2327,13 @@ app.post('/api/casino/spin', async (req, res) => {
     if (user.tonki < bet) {
       return res.status(400).json({ error: 'Недостаточно тонков', need: bet - user.tonki });
     }
+    
 
-    // 🆕 Добавляем картинку штамма в список символов
+    // 🆕 В спорте: 🍎 -> ⚽, 🍑 -> /Checushka.png
     const symbols = isSport
-      ? ['🍎', '🍇', '🍑', '🎩', '/shtammm.png']
+      ? ['⚽', '🍇', '/Checushka.png', '🎩', '/shtammm.png']
       : ['🍎', '🍇', '🍑', '🍌', '/shtammm.png'];
 
-    // 🆕 Веса: штамм выпадает очень часто (30 из 100)
     const weights = isSport
       ? [20, 20, 20, 5, 35]
       : [20, 20, 20, 3, 37]; 
@@ -2350,44 +2350,34 @@ app.post('/api/casino/spin', async (req, res) => {
 
     const reels = [pickWeighted(), pickWeighted(), pickWeighted()];
 
-    const appleCount = reels.filter(r => r === '🍎').length;
+    // 🆕 Считаем новые символы
+    const ballCount = reels.filter(r => r === '⚽').length;
     const grapeCount = reels.filter(r => r === '🍇').length;
-    const plumCount = reels.filter(r => r === '🍑').length;
+    const chekCount = reels.filter(r => r === '/Checushka.png').length;
     const jackpotSymbol = isSport ? '🎩' : '🍌';
     const jackpotCount = reels.filter(r => r === jackpotSymbol).length;
-    
-    // 🆕 Считаем штаммы
     const stampCount = reels.filter(r => r === '/shtammm.png').length;
 
     const M = isSport ? 3 : 1;
     let winAmount = 0;
     let prizeType = 'lose';
 
-    // 🆕 ЛОГИКА ШТАММА (АНТИ-ИКСОВ)
-    if (stampCount === 3) {
-      winAmount = Math.floor(bet * 0); // 0x (полный проигрыш)
-      prizeType = 'stamp_triple';
-    } 
-    else if (stampCount === 2) {
-      winAmount = Math.floor(bet * 0.3); // 0.3x
-      prizeType = 'stamp_double';
-    }
-    else if (stampCount === 1) {
-      winAmount = Math.floor(bet * 0.6); // 0.6x
-      prizeType = 'stamp_single';
-    }
-    // Если штаммов нет — играем по старой логике
+    // 🆕 Логика штаммов
+    if (stampCount === 3) { winAmount = 0; prizeType = 'stamp_triple'; }
+    else if (stampCount === 2) { winAmount = Math.floor(bet * 0.3); prizeType = 'stamp_double'; }
+    else if (stampCount === 1) { winAmount = Math.floor(bet * 0.6); prizeType = 'stamp_single'; }
+    // Логика с новыми символами
     else if (jackpotCount === 3) { winAmount = Math.floor(bet * 16 * M); prizeType = 'jackpot_banana'; }
     else if (jackpotCount === 2) { winAmount = Math.floor(bet * 8 * M); prizeType = 'double_banana'; }
     else if (jackpotCount === 1) { winAmount = Math.floor(bet * 4 * M); prizeType = 'banana'; }
-    else if (appleCount === 3) { winAmount = Math.floor(bet * 2 * M); prizeType = 'triple_apple'; }
+    else if (ballCount === 3) { winAmount = Math.floor(bet * 2 * M); prizeType = 'triple_ball'; }
     else if (grapeCount === 3) { winAmount = Math.floor(bet * 4 * M); prizeType = 'triple_grape'; }
-    else if (plumCount === 3) { winAmount = Math.floor(bet * 8 * M); prizeType = 'triple_plum'; }
+    else if (chekCount === 3) { winAmount = Math.floor(bet * 8 * M); prizeType = 'triple_chek'; }
     else if (grapeCount === 2) { winAmount = Math.floor(bet * 3 * M); prizeType = 'double_grape'; }
-    else if (plumCount === 2) { winAmount = Math.floor(bet * 2 * M); prizeType = 'double_plum'; }
-    else if (appleCount === 2) { winAmount = Math.floor(bet * 1.5 * M); prizeType = 'double_apple'; }
+    else if (chekCount === 2) { winAmount = Math.floor(bet * 2 * M); prizeType = 'double_chek'; }
+    else if (ballCount === 2) { winAmount = Math.floor(bet * 1.5 * M); prizeType = 'double_ball'; }
     else if (grapeCount === 1) { winAmount = Math.floor(bet * 1.6 * M); prizeType = 'one_grape'; }
-    else if (plumCount === 1) { winAmount = Math.floor(bet * 1.2 * M); prizeType = 'one_plum'; }
+    else if (chekCount === 1) { winAmount = Math.floor(bet * 1.2 * M); prizeType = 'one_chek'; }
     else { winAmount = 0; prizeType = 'lose'; }
 
     const newTonki = user.tonki - bet + winAmount;
