@@ -2436,12 +2436,12 @@ app.post('/api/casino/spin', async (req, res) => {
     }
 
     const symbols = isSport
-      ? ['⚽', '🍇', '/Checushka.png', '🎩', '/shtammm.png']
+      ? ['⚽', '🍇', '/Checushka.png', '/shlapa.png', '/shtammm.png']
       : ['🍎', '🍇', '🍑', '🍌', '/shtammm.png'];
 
     const weights = isSport
-      ? Array.of(20, 20, 20, 5, 35)
-      : Array.of(20, 20, 20, 3, 37);
+      ? Array.of(25, 20, 15, 5, 35)
+      : Array.of(27, 18, 8, 2, 45);
 
     const pickWeighted = () => {
       const total = weights.reduce((s, w) => s + w, 0);
