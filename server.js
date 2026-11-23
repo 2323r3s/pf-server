@@ -1572,9 +1572,18 @@ app.get('/api/admin/check_stamp/:phone', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// ── МАГАЗИН (все лоты) ──
 app.get('/api/shop', async (req, res) => {
   try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS shop_lots (
+        id TEXT PRIMARY KEY,
+        seller_phone TEXT NOT NULL,
+        seller_name TEXT NOT NULL,
+        items JSONB NOT NULL DEFAULT '[]'::jsonb,
+        price INTEGER NOT NULL,
+        date TEXT NOT NULL
+      );
+    `);
     const r = await pool.query('SELECT * FROM shop_lots ORDER BY id DESC');
     const lots = r.rows.map(row => ({
       id: row.id,
@@ -1590,9 +1599,18 @@ app.get('/api/shop', async (req, res) => {
   }
 });
 
-// Выставить новый лот
 app.post('/api/shop', async (req, res) => {
   try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS shop_lots (
+        id TEXT PRIMARY KEY,
+        seller_phone TEXT NOT NULL,
+        seller_name TEXT NOT NULL,
+        items JSONB NOT NULL DEFAULT '[]'::jsonb,
+        price INTEGER NOT NULL,
+        date TEXT NOT NULL
+      );
+    `);
     const { id, sellerPhone, sellerName, items, price, date } = req.body;
     await pool.query(
       `INSERT INTO shop_lots (id, seller_phone, seller_name, items, price, date)
@@ -1604,6 +1622,7 @@ app.post('/api/shop', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
 
 // Удалить / купить / снять лот
 app.delete('/api/shop/:id', async (req, res) => {
