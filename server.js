@@ -1141,31 +1141,28 @@ app.post('/api/users', async (req, res) => {
 
 app.post('/api/groups', async (req, res) => {
   try {
-    const { id, name, avatar, creatorPhone, members } = req.body;
-    if (!name || !creatorPhone) {
-      return res.status(400).json({ error: 'Нужно название и создатель' });
-    }
+    const { id, name, avatar, creatorPhone, creatorName, members } = req.body;
+    const list = Array.isArray(members) ? [...members] : [];
 
-    const groupId = id || Date.now();
+    if (creatorPhone && !list.some(m => m.phone === creatorPhone)) {
+      list.unshift({
+        phone: creatorPhone,
+        name: creatorName || creatorPhone,
+      });
+    }
 
     await pool.query(
-      'INSERT INTO group_chats (id, name, avatar, creator_phone) VALUES ($1, $2, $3, $4)',
-      [groupId, name, avatar || null, creatorPhone]
+      `INSERT INTO groups (id, name, avatar, creator_phone, members)
+       VALUES ($1, $2, $3, $4, $5::jsonb)`,
+      [id, name, avatar || null, creatorPhone, JSON.stringify(list)]
     );
 
-    const uniqueMembers = Array.isArray(members) ? members : [];
-    for (const m of uniqueMembers) {
-      await pool.query(
-        'INSERT INTO group_members (group_id, phone, name) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING',
-        [groupId, m.phone, m.name]
-      );
-    }
-
-    res.json({ ok: true, id: groupId });
+    res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
+
 
 
 // Получить сообщения группы
