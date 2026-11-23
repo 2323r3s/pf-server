@@ -510,6 +510,26 @@ await pool.query(`
     `);
 
     await pool.query(`
+  CREATE TABLE IF NOT EXISTS shop_lots (
+    id TEXT PRIMARY KEY,
+    seller_phone TEXT NOT NULL,
+    seller_name TEXT NOT NULL,
+    items JSONB NOT NULL DEFAULT '[]'::jsonb,
+    price INTEGER NOT NULL,
+    date TEXT NOT NULL
+  );
+`);
+
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS user_inventories (
+    phone TEXT PRIMARY KEY,
+    items JSONB NOT NULL DEFAULT '[]'::jsonb,
+    quick_slots JSONB NOT NULL DEFAULT '[null, null, null]'::jsonb
+  );
+`);
+
+
+    await pool.query(`
       CREATE TABLE IF NOT EXISTS party_requests (
         id BIGINT PRIMARY KEY,
         party_id BIGINT NOT NULL,
@@ -1551,6 +1571,81 @@ app.get('/api/admin/check_stamp/:phone', async (req, res) => {
     res.json({ active: true, until: u.stamp_until, reason: u.ban_reason });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
+
+// ── МАГАЗИН (все лоты) ──
+app.get('/api/shop', async (req, res) => {
+  try {
+    const r = await pool.query('SELECT * FROM shop_lots ORDER BY id DESC');
+    const lots = r.rows.map(row => ({
+      id: row.id,
+      sellerPhone: row.seller_phone,
+      sellerName: row.seller_name,
+      items: Array.isArray(row.items) ? row.items : [],
+      price: row.price,
+      date: row.date,
+    }));
+    res.json(lots);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Выставить новый лот
+app.post('/api/shop', async (req, res) => {
+  try {
+    const { id, sellerPhone, sellerName, items, price, date } = req.body;
+    await pool.query(
+      `INSERT INTO shop_lots (id, seller_phone, seller_name, items, price, date)
+       VALUES ($1, $2, $3, $4::jsonb, $5, $6)`,
+      [id, sellerPhone, sellerName, JSON.stringify(items || []), price, date]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Удалить / купить / снять лот
+app.delete('/api/shop/:id', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM shop_lots WHERE id = $1', [req.params.id]);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── ИНВЕНТАРЬ И БЫСТРЫЕ СЛОТЫ ──
+app.get('/api/inventory/:phone', async (req, res) => {
+  try {
+    const r = await pool.query('SELECT * FROM user_inventories WHERE phone = $1', [req.params.phone]);
+    if (r.rows.length === 0) {
+      return res.json({ items: [], quickSlots: [null, null, null] });
+    }
+    res.json({
+      items: r.rows[0].items || [],
+      quickSlots: r.rows[0].quick_slots || [null, null, null],
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/inventory/:phone', async (req, res) => {
+  try {
+    const { items, quickSlots } = req.body;
+    await pool.query(
+      `INSERT INTO user_inventories (phone, items, quick_slots)
+       VALUES ($1, $2::jsonb, $3::jsonb)
+       ON CONFLICT (phone) DO UPDATE SET items = $2::jsonb, quick_slots = $3::jsonb`,
+      [req.params.phone, JSON.stringify(items || []), JSON.stringify(quickSlots || [null, null, null])]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 
 // ═══════════════════════════════════════════════════════
 // ПРОФЕССИИ
