@@ -2389,17 +2389,15 @@ app.post('/api/casino/spin', async (req, res) => {
     if (!phone || !bet || bet < 20 || bet > 1000) {
       return res.status(400).json({ error: 'Ставка 20-1000' });
     }
-    
+
     const isSport = mode === 'sport';
 
     const userRes = await pool.query('SELECT * FROM users WHERE phone=$1', [phone]);
     if (userRes.rows.length === 0) return res.status(404).json({ error: 'Not found' });
-    
-    // ✅ СНАЧАЛА объявляем user
+
     const user = userRes.rows[0];
     const isPR = user.status === 'ПР';
 
-    // ✅ ТЕПЕРЬ проверяем блокировку
     if (user.casino_blocked_until && new Date(user.casino_blocked_until) > new Date()) {
       const ms = new Date(user.casino_blocked_until).getTime() - Date.now();
       const h = Math.floor(ms / 3600000), m = Math.floor((ms % 3600000) / 60000);
@@ -2415,7 +2413,6 @@ app.post('/api/casino/spin', async (req, res) => {
       const today = new Date().toISOString().slice(0, 10);
       const dailyRes = await pool.query('SELECT * FROM casino_daily WHERE phone=$1', [phone]);
 
-      // 🆕 Спорт: отдельный лимит 5
       if (isSport) {
         const sportRes = await pool.query('SELECT * FROM casino_sport_daily WHERE phone=$1', [phone]);
         if (sportRes.rows.length > 0) {
@@ -2425,7 +2422,6 @@ app.post('/api/casino/spin', async (req, res) => {
           }
         }
       } else {
-        // Обычный: лимит 15
         if (dailyRes.rows.length > 0) {
           const d = dailyRes.rows[0];
           if (d.last_date === today && d.count >= 15) {
@@ -2438,16 +2434,14 @@ app.post('/api/casino/spin', async (req, res) => {
     if (user.tonki < bet) {
       return res.status(400).json({ error: 'Недостаточно тонков', need: bet - user.tonki });
     }
-    
 
-    // 🆕 В спорте: 🍎 -> ⚽, 🍑 -> /Checushka.png
     const symbols = isSport
       ? ['⚽', '🍇', '/Checushka.png', '🎩', '/shtammm.png']
       : ['🍎', '🍇', '🍑', '🍌', '/shtammm.png'];
 
     const weights = isSport
-      ? [20, 20, 20, 5, 35]
-      : [20, 20, 20, 3, 37]; 
+      ? Array.of(20, 20, 20, 5, 35)
+      : Array.of(20, 20, 20, 3, 37);
 
     const pickWeighted = () => {
       const total = weights.reduce((s, w) => s + w, 0);
@@ -2460,8 +2454,8 @@ app.post('/api/casino/spin', async (req, res) => {
     };
 
     const reels = [pickWeighted(), pickWeighted(), pickWeighted()];
-
-    // 🆕 Считаем новые символы
+    const appleCount = reels.filter(r => r === '🍎').length;
+    const plumCount = reels.filter(r => r === '🍑').length;
     const ballCount = reels.filter(r => r === '⚽').length;
     const grapeCount = reels.filter(r => r === '🍇').length;
     const chekCount = reels.filter(r => r === '/Checushka.png').length;
@@ -2470,30 +2464,56 @@ app.post('/api/casino/spin', async (req, res) => {
     const stampCount = reels.filter(r => r === '/shtammm.png').length;
 
     const M = isSport ? 3 : 1;
-    let winAmount = 0;
-    let prizeType = 'lose';
+    const factors = [];
 
-    // 🆕 Логика штаммов
-    if (stampCount === 3) { winAmount = 0; prizeType = 'stamp_triple'; }
-    else if (stampCount === 2) { winAmount = Math.floor(bet * 0.3); prizeType = 'stamp_double'; }
-    else if (stampCount === 1) { winAmount = Math.floor(bet * 0.6); prizeType = 'stamp_single'; }
-    // Логика с новыми символами
-    else if (jackpotCount === 3) { winAmount = Math.floor(bet * 16 * M); prizeType = 'jackpot_banana'; }
-    else if (jackpotCount === 2) { winAmount = Math.floor(bet * 8 * M); prizeType = 'double_banana'; }
-    else if (jackpotCount === 1) { winAmount = Math.floor(bet * 4 * M); prizeType = 'banana'; }
-    else if (ballCount === 3) { winAmount = Math.floor(bet * 2 * M); prizeType = 'triple_ball'; }
-    else if (grapeCount === 3) { winAmount = Math.floor(bet * 4 * M); prizeType = 'triple_grape'; }
-    else if (chekCount === 3) { winAmount = Math.floor(bet * 8 * M); prizeType = 'triple_chek'; }
-    else if (grapeCount === 2) { winAmount = Math.floor(bet * 3 * M); prizeType = 'double_grape'; }
-    else if (chekCount === 2) { winAmount = Math.floor(bet * 2 * M); prizeType = 'double_chek'; }
-    else if (ballCount === 2) { winAmount = Math.floor(bet * 1.5 * M); prizeType = 'double_ball'; }
-    else if (grapeCount === 1) { winAmount = Math.floor(bet * 1.6 * M); prizeType = 'one_grape'; }
-    else if (chekCount === 1) { winAmount = Math.floor(bet * 1.2 * M); prizeType = 'one_chek'; }
-    else { winAmount = 0; prizeType = 'lose'; }
+    if (stampCount === 3) {
+      factors.push({ label: '3 ШТАММА', mult: 0 });
+    } else if (stampCount === 2) {
+      factors.push({ label: '2 ШТАММА', mult: 0.3 });
+    } else if (stampCount === 1) {
+      factors.push({ label: '1 ШТАММ', mult: 0.6 });
+    }
+
+    if (jackpotCount === 3) {
+      factors.push({ label: isSport ? '3 ШЛЯПЫ' : '3 БАНАНА', mult: 16 * M });
+    } else if (jackpotCount === 2) {
+      factors.push({ label: isSport ? '2 ШЛЯПЫ' : '2 БАНАНА', mult: 8 * M });
+    } else if (jackpotCount === 1) {
+      factors.push({ label: isSport ? 'ШЛЯПА' : 'БАНАН', mult: 4 * M });
+    }
+
+    if (chekCount === 3) factors.push({ label: '3 ЧЕКУШКИ', mult: 8 * M });
+    else if (chekCount === 2) factors.push({ label: '2 ЧЕКУШКИ', mult: 2 * M });
+    else if (chekCount === 1) factors.push({ label: 'ЧЕКУШКА', mult: Number((1.2 * M).toFixed(1)) });
+
+    if (grapeCount === 3) factors.push({ label: '3 ВИНОГРАДА', mult: 4 * M });
+    else if (grapeCount === 2) factors.push({ label: '2 ВИНОГРАДА', mult: 3 * M });
+    else if (grapeCount === 1) factors.push({ label: 'ВИНОГРАД', mult: Number((1.6 * M).toFixed(1)) });
+
+    if (plumCount === 3) factors.push({ label: '3 СЛИВЫ', mult: 8 * M });
+    else if (plumCount === 2) factors.push({ label: '2 СЛИВЫ', mult: 2 * M });
+    else if (plumCount === 1) factors.push({ label: 'СЛИВА', mult: Number((1.2 * M).toFixed(1)) });
+
+    if (appleCount === 3) factors.push({ label: '3 ЯБЛОКА', mult: 2 * M });
+    else if (appleCount === 2) factors.push({ label: '2 ЯБЛОКА', mult: Number((1.5 * M).toFixed(1)) });
+
+    if (ballCount === 3) factors.push({ label: '3 МЯЧА', mult: 2 * M });
+    else if (ballCount === 2) factors.push({ label: '2 МЯЧА', mult: Number((1.5 * M).toFixed(1)) });
+
+    let totalMult = 0;
+    if (factors.length > 0) {
+      totalMult = Number(factors.reduce((acc, f) => acc * f.mult, 1).toFixed(2));
+    }
+
+    const winAmount = Math.floor(bet * totalMult);
+
+    let prizeType = 'lose';
+    if (jackpotCount === 3 && stampCount === 0) prizeType = 'jackpot_banana';
+    else if (totalMult > 0) prizeType = 'combo_mult';
+    else if (stampCount > 0) prizeType = 'stamp_triple';
 
     const newTonki = user.tonki - bet + winAmount;
 
-    // 🆕 Джекпот-аура — только в обычном (не в спорте)
     let auraBonus = 0;
     if (!isSport && prizeType === 'jackpot_banana') auraBonus = 1000;
 
@@ -2512,7 +2532,6 @@ app.post('/api/casino/spin', async (req, res) => {
       await pool.query('UPDATE users SET tonki=$1 WHERE phone=$2', [newTonki, phone]);
     }
 
-    // 🆕 Лимит: спорт — 5, обычный — 15
     let gamesLeft = null;
     if (!isPR) {
       const today = new Date().toISOString().slice(0, 10);
@@ -2549,12 +2568,14 @@ app.post('/api/casino/spin', async (req, res) => {
     res.json({
       ok: true, reels, bet, winAmount,
       netWin: winAmount - bet, prizeType,
+      totalMult, factors,
       newTonki, oldTonki: user.tonki,
       gamesLeft, isPR, auraBonus,
       mode: isSport ? 'sport' : 'classic',
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
+
 
 app.get('/api/casino/history/:phone', async (req, res) => {
   try {
