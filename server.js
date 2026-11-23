@@ -2386,8 +2386,8 @@ app.get('/api/doc_requests', async (req, res) => {
 app.post('/api/casino/spin', async (req, res) => {
   try {
     const { phone, name, bet, mode = 'classic' } = req.body;
-    if (!phone || !bet || bet < 20 || bet > 1000) {
-      return res.status(400).json({ error: 'Ставка 20-1000' });
+    if (!phone || !bet || bet < 10 || bet > 10000) {
+      return res.status(400).json({ error: 'Ставка 10-10000' });
     }
 
     const isSport = mode === 'sport';
